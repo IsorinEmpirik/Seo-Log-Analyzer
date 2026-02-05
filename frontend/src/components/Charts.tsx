@@ -74,7 +74,11 @@ export function CrawlLineChart({ data, title }: LineChartProps) {
     );
   }
 
-  return <canvas ref={chartRef} className="w-full h-64" />;
+  return (
+    <div className="relative h-64 w-full">
+      <canvas ref={chartRef} />
+    </div>
+  );
 }
 
 interface HttpCodeChartProps {
@@ -132,7 +136,11 @@ export function HttpCodeChart({ data }: HttpCodeChartProps) {
     );
   }
 
-  return <canvas ref={chartRef} className="w-full h-64" />;
+  return (
+    <div className="relative h-64 w-full">
+      <canvas ref={chartRef} />
+    </div>
+  );
 }
 
 interface BarChartProps {
@@ -201,5 +209,9 @@ export function BarChart({ data, title, horizontal = false }: BarChartProps) {
     );
   }
 
-  return <canvas ref={chartRef} className="w-full h-64" />;
+  return (
+    <div className="relative h-64 w-full">
+      <canvas ref={chartRef} />
+    </div>
+  );
 }

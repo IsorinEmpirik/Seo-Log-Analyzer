@@ -24,7 +24,12 @@ export function ClientSelector({ selectedClient, onSelectClient }: ClientSelecto
       const data = await getClients();
       setClients(data);
       if (data.length > 0 && !selectedClient) {
-        onSelectClient(data[0]);
+        // Restore last selected client from localStorage
+        const savedClientId = localStorage.getItem('selectedClientId');
+        const savedClient = savedClientId
+          ? data.find((c) => c.id === Number(savedClientId))
+          : null;
+        onSelectClient(savedClient || data[0]);
       }
     } catch (error) {
       console.error('Failed to load clients:', error);

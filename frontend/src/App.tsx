@@ -12,6 +12,15 @@ import { Client } from '@/lib/api';
 export default function App() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
 
+  const handleSelectClient = (client: Client | null) => {
+    setSelectedClient(client);
+    if (client) {
+      localStorage.setItem('selectedClientId', String(client.id));
+    } else {
+      localStorage.removeItem('selectedClientId');
+    }
+  };
+
   return (
     <Layout>
       <div className="flex gap-6">
@@ -19,7 +28,7 @@ export default function App() {
         <aside className="w-64 flex-shrink-0">
           <ClientSelector
             selectedClient={selectedClient}
-            onSelectClient={setSelectedClient}
+            onSelectClient={handleSelectClient}
           />
         </aside>
 
