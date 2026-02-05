@@ -7,7 +7,7 @@ import sys
 import os
 import time
 import webbrowser
-import signal
+import urllib.request
 import psutil
 
 # Configuration
@@ -55,74 +55,90 @@ def cleanup():
     # Kill backend
     backend_proc = find_process_by_port(BACKEND_PORT)
     if backend_proc:
-        print(f"Arrêt du backend (PID: {backend_proc.pid})")
+        print(f"  Arret du backend (PID: {backend_proc.pid})")
         kill_process_tree(backend_proc)
 
     # Kill frontend
     frontend_proc = find_process_by_port(FRONTEND_PORT)
     if frontend_proc:
-        print(f"Arrêt du frontend (PID: {frontend_proc.pid})")
+        print(f"  Arret du frontend (PID: {frontend_proc.pid})")
         kill_process_tree(frontend_proc)
 
-    print("Terminé.")
+    print("Termine.")
+
+
+def wait_for_server(url, timeout=30, label="server"):
+    """Wait until a server responds with HTTP 200"""
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            response = urllib.request.urlopen(url, timeout=2)
+            if response.status == 200:
+                print(f"  {label} pret!")
+                return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    print(f"  ATTENTION: {label} n'a pas demarre dans les {timeout}s")
+    return False
 
 
 def main():
-    processes = []
-
     try:
-        # Check if ports are available
-        if find_process_by_port(BACKEND_PORT):
-            print(f"Port {BACKEND_PORT} déjà utilisé. Fermeture...")
-            cleanup()
-            time.sleep(1)
+        # Clean existing processes on our ports
+        for port in [BACKEND_PORT, FRONTEND_PORT]:
+            existing = find_process_by_port(port)
+            if existing:
+                print(f"Port {port} deja utilise. Fermeture...")
+                kill_process_tree(existing)
+                time.sleep(1)
 
-        if find_process_by_port(FRONTEND_PORT):
-            print(f"Port {FRONTEND_PORT} déjà utilisé. Fermeture...")
-            cleanup()
-            time.sleep(1)
-
-        print("Démarrage de SEO Log Analyzer...")
+        print("=" * 50)
+        print("  SEO Log Analyzer")
+        print("=" * 50)
 
         # Start backend
-        print(f"Démarrage du backend sur le port {BACKEND_PORT}...")
+        print(f"\n[1/3] Demarrage du backend (port {BACKEND_PORT})...")
         backend_process = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(BACKEND_PORT)],
             cwd=BACKEND_DIR,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
         )
-        processes.append(backend_process)
 
-        # Wait for backend to start
-        time.sleep(2)
+        # Wait for backend to be actually ready
+        if not wait_for_server(f"http://localhost:{BACKEND_PORT}/health", timeout=20, label="Backend"):
+            print("ERREUR: Backend n'a pas demarre. Verifiez les logs.")
+            backend_process.terminate()
+            return
 
         # Start frontend
-        print(f"Démarrage du frontend sur le port {FRONTEND_PORT}...")
+        print(f"\n[2/3] Demarrage du frontend (port {FRONTEND_PORT})...")
         npm_cmd = "npm.cmd" if os.name == 'nt' else "npm"
         frontend_process = subprocess.Popen(
             [npm_cmd, "run", "dev"],
             cwd=FRONTEND_DIR,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
         )
-        processes.append(frontend_process)
 
-        # Wait for frontend to start
-        time.sleep(3)
+        # Wait for frontend to be actually ready
+        if not wait_for_server(f"http://localhost:{FRONTEND_PORT}", timeout=30, label="Frontend"):
+            print("ERREUR: Frontend n'a pas demarre. Verifiez les logs.")
+            cleanup()
+            return
 
         # Open browser
-        print(f"Ouverture du navigateur: {FRONTEND_URL}")
+        print(f"\n[3/3] Ouverture du navigateur...")
         webbrowser.open(FRONTEND_URL)
 
-        print("\n" + "="*50)
-        print("SEO Log Analyzer est en cours d'exécution!")
-        print(f"URL: {FRONTEND_URL}")
-        print("Appuyez sur Ctrl+C pour arrêter...")
-        print("="*50 + "\n")
+        print(f"\n{'=' * 50}")
+        print(f"  SEO Log Analyzer est en cours d'execution!")
+        print(f"  URL: {FRONTEND_URL}")
+        print(f"  Appuyez sur Ctrl+C pour arreter...")
+        print(f"{'=' * 50}\n")
 
         # Wait for processes
         while True:
             time.sleep(1)
-            # Check if processes are still running
             if backend_process.poll() is not None or frontend_process.poll() is not None:
                 break
 

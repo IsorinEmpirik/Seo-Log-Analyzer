@@ -1,20 +1,39 @@
 const API_BASE = '/api';
 
-async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  });
+async function fetchApi<T>(endpoint: string, options?: RequestInit, retries = 3): Promise<T> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(`${API_BASE}${endpoint}`, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options?.headers,
+        },
+      });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'An error occurred' }));
-    throw new Error(error.detail || 'An error occurred');
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'An error occurred' }));
+        // Retry on 500/502/503 (server not ready)
+        if (response.status >= 500 && attempt < retries) {
+          console.log(`[API] Retry ${attempt}/${retries} for ${endpoint}...`);
+          await new Promise((r) => setTimeout(r, attempt * 1000));
+          continue;
+        }
+        throw new Error(error.detail || 'An error occurred');
+      }
+
+      return response.json();
+    } catch (error) {
+      // Retry on network errors (backend not started yet)
+      if (attempt < retries && error instanceof TypeError) {
+        console.log(`[API] Backend not ready, retry ${attempt}/${retries}...`);
+        await new Promise((r) => setTimeout(r, attempt * 1500));
+        continue;
+      }
+      throw error;
+    }
   }
-
-  return response.json();
+  throw new Error('Server unavailable');
 }
 
 // Clients
