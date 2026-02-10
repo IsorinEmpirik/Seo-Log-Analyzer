@@ -149,6 +149,7 @@ export function Pages({ client }: PagesProps) {
                   <th className="px-4 py-3 font-medium">URL</th>
                   <th className="px-4 py-3 font-medium text-center">Code HTTP</th>
                   <th className="px-4 py-3 font-medium text-right">Crawls</th>
+                  <th className="px-4 py-3 font-medium text-right">Crawlée tous les</th>
                   <th className="px-4 py-3 font-medium">Dernier crawl</th>
                 </tr>
               </thead>
@@ -175,6 +176,11 @@ export function Pages({ client }: PagesProps) {
                     </td>
                     <td className="px-4 py-3 text-right font-medium">
                       {formatNumber(page.crawl_count)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-text-muted">
+                      {page.crawl_interval != null
+                        ? `${page.crawl_interval} j`
+                        : '-'}
                     </td>
                     <td className="px-4 py-3 text-text-muted">
                       {page.last_crawl ? formatDateTime(page.last_crawl) : '-'}

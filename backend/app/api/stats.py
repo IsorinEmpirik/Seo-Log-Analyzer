@@ -72,6 +72,16 @@ def get_pages(
     from sqlalchemy import func, distinct
     from app.models.models import Log
 
+    # Get total date range to compute crawl intervals
+    date_range = (
+        db.query(func.min(Log.log_date), func.max(Log.log_date))
+        .filter(Log.client_id == client_id)
+        .first()
+    )
+    total_days = 0
+    if date_range and date_range[0] and date_range[1] and date_range[0] != date_range[1]:
+        total_days = (date_range[1] - date_range[0]).days
+
     query = (
         db.query(
             Log.url,
@@ -106,7 +116,8 @@ def get_pages(
                 "url": r.url,
                 "crawl_count": r.crawl_count,
                 "last_crawl": r.last_crawl,
-                "http_code": r.http_code
+                "http_code": r.http_code,
+                "crawl_interval": round(total_days / r.crawl_count, 1) if total_days > 0 and r.crawl_count > 0 else None
             }
             for r in results
         ]

@@ -75,6 +75,7 @@ class TopPageStats(BaseModel):
 class DashboardStats(BaseModel):
     total_crawls: int
     unique_pages: int
+    avg_crawl_interval: Optional[float] = None  # Average days between crawls per page
     date_range: dict
     http_codes: List[HttpCodeStats]
     daily_crawls: List[DailyCrawlStats]

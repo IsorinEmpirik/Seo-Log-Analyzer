@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BarChart3, FileText, AlertTriangle, TrendingUp } from 'lucide-react';
+import { BarChart3, FileText, AlertTriangle, TrendingUp, Clock } from 'lucide-react';
 import { getDashboardStats, DashboardStats, Client } from '@/lib/api';
 import { StatCard } from '@/components/StatCard';
 import { CrawlLineChart, HttpCodeChart } from '@/components/Charts';
@@ -104,7 +104,7 @@ export function Dashboard({ client }: DashboardProps) {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard
           title="Total Crawls"
           value={formatNumber(stats.total_crawls)}
@@ -123,6 +123,16 @@ export function Dashboard({ client }: DashboardProps) {
               : '0'
           }
           icon={<TrendingUp className="w-6 h-6" />}
+        />
+        <StatCard
+          title="Crawlée tous les"
+          value={
+            stats.avg_crawl_interval != null
+              ? `${stats.avg_crawl_interval} j`
+              : '-'
+          }
+          subtitle="Intervalle moyen par page"
+          icon={<Clock className="w-6 h-6" />}
         />
         <StatCard
           title="Erreurs (4xx/5xx)"

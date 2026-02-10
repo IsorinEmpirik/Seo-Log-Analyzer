@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
 from datetime import date
 from typing import List, Optional
+from urllib.parse import urlparse
 from app.models.models import Log, ScreamingFrogUrl
 from app.schemas.schemas import (
     HttpCodeStats, DailyCrawlStats, TopPageStats, DashboardStats,
@@ -81,9 +82,27 @@ def get_dashboard_stats(
         for url, count in top_pages_raw
     ]
 
+    # Average crawl interval: on average, each page is crawled every X days
+    avg_crawl_interval = None
+    if min_date and max_date and min_date != max_date and unique_pages and unique_pages > 0:
+        total_days = (max_date - min_date).days
+        if total_days > 0:
+            # For each page: interval = total_days / crawl_count
+            # Average across all pages
+            page_crawl_counts = (
+                query
+                .with_entities(Log.url, func.count(Log.id).label('count'))
+                .group_by(Log.url)
+                .all()
+            )
+            intervals = [total_days / count for _, count in page_crawl_counts if count > 0]
+            if intervals:
+                avg_crawl_interval = round(sum(intervals) / len(intervals), 1)
+
     return DashboardStats(
         total_crawls=total_crawls,
         unique_pages=unique_pages,
+        avg_crawl_interval=avg_crawl_interval,
         date_range={"start": str(min_date) if min_date else None, "end": str(max_date) if max_date else None},
         http_codes=http_codes,
         daily_crawls=daily_crawls,
@@ -104,21 +123,24 @@ def get_orphan_pages(db: Session, client_id: int) -> List[OrphanPage]:
         .all()
     )
 
-    # Get all URLs from Screaming Frog
-    sf_urls = set(
-        url for (url,) in
-        db.query(ScreamingFrogUrl.url)
-        .filter(ScreamingFrogUrl.client_id == client_id)
-        .all()
-    )
+    # Get all URLs from Screaming Frog, normalized to path only
+    # SF stores full URLs like https://domain.com/path, logs store /path
+    sf_paths = set()
+    for (url,) in db.query(ScreamingFrogUrl.url).filter(ScreamingFrogUrl.client_id == client_id).all():
+        parsed = urlparse(url)
+        path = parsed.path.rstrip('/')
+        if not path:
+            path = '/'
+        sf_paths.add(path)
 
-    # Find orphans
+    # Find orphans: log URLs not present in Screaming Frog paths
     orphans = []
     for url, count, last_crawl in log_urls:
-        # Normalize URL for comparison
         normalized_url = url.rstrip('/')
+        if not normalized_url:
+            normalized_url = '/'
 
-        if normalized_url not in sf_urls and url not in sf_urls:
+        if normalized_url not in sf_paths:
             orphans.append(OrphanPage(
                 url=url,
                 crawl_count=count,

@@ -161,6 +161,7 @@ export interface TopPageStats {
 export interface DashboardStats {
   total_crawls: number;
   unique_pages: number;
+  avg_crawl_interval: number | null;
   date_range: { start: string | null; end: string | null };
   http_codes: HttpCodeStats[];
   daily_crawls: DailyCrawlStats[];
@@ -178,6 +179,7 @@ export interface PageStats {
   crawl_count: number;
   last_crawl?: string;
   http_code?: number;
+  crawl_interval?: number;
 }
 
 export interface PeriodComparison {
