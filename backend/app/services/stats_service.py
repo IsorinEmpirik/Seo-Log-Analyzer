@@ -115,10 +115,11 @@ def get_orphan_pages(db: Session, client_id: int) -> List[OrphanPage]:
     Find pages crawled by Googlebot but not in Screaming Frog export.
     These are "orphan" pages that have no internal links.
     """
-    # Get all URLs from logs
+    # Get all URLs from logs (only 200 OK responses)
     log_urls = (
         db.query(Log.url, func.count(Log.id).label('count'), func.max(Log.timestamp).label('last'))
         .filter(Log.client_id == client_id)
+        .filter(Log.http_code == 200)
         .group_by(Log.url)
         .all()
     )
