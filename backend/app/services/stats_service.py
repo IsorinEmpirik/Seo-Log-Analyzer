@@ -113,13 +113,33 @@ def get_dashboard_stats(
 def get_orphan_pages(db: Session, client_id: int) -> List[OrphanPage]:
     """
     Find pages crawled by Googlebot but not in Screaming Frog export.
-    These are "orphan" pages that have no internal links.
+    Only pages whose most recent crawl returned HTTP 200.
     """
-    # Get all URLs from logs (only 200 OK responses)
+    # Get all URLs from logs with total count, last crawl timestamp, and last HTTP code
+    from sqlalchemy import case
+    from sqlalchemy.sql import literal_column
+
+    # Subquery: for each URL, get the timestamp of the most recent crawl
+    latest_ts_subq = (
+        db.query(Log.url, func.max(Log.timestamp).label('max_ts'))
+        .filter(Log.client_id == client_id)
+        .group_by(Log.url)
+        .subquery()
+    )
+
+    # Get the HTTP code of the most recent crawl for each URL
+    latest_code = (
+        db.query(Log.url, Log.http_code)
+        .join(latest_ts_subq, (Log.url == latest_ts_subq.c.url) & (Log.timestamp == latest_ts_subq.c.max_ts))
+        .filter(Log.client_id == client_id)
+        .all()
+    )
+    last_code_map = {url: code for url, code in latest_code}
+
+    # Get all URLs with their stats
     log_urls = (
         db.query(Log.url, func.count(Log.id).label('count'), func.max(Log.timestamp).label('last'))
         .filter(Log.client_id == client_id)
-        .filter(Log.http_code == 200)
         .group_by(Log.url)
         .all()
     )
@@ -134,12 +154,16 @@ def get_orphan_pages(db: Session, client_id: int) -> List[OrphanPage]:
             path = '/'
         sf_paths.add(path)
 
-    # Find orphans: log URLs not present in Screaming Frog paths
+    # Find orphans: log URLs not in SF, and whose last crawl was 200
     orphans = []
     for url, count, last_crawl in log_urls:
         normalized_url = url.rstrip('/')
         if not normalized_url:
             normalized_url = '/'
+
+        # Only include if last HTTP code is 200
+        if last_code_map.get(url) != 200:
+            continue
 
         if normalized_url not in sf_paths:
             orphans.append(OrphanPage(
