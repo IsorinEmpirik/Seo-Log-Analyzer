@@ -1,4 +1,5 @@
 import re
+import csv
 import pandas as pd
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Generator, Tuple
@@ -82,6 +83,196 @@ def count_lines(file_path: str) -> int:
                 break
             count += buf.count(b"\n")
     return count
+
+
+# --- CSV log parser (structured CSV with columns like host, ip, url, user_agent) ---
+
+# Possible column names mapped to our internal fields
+_CSV_COL_MAP = {
+    "ip": ["ip", "client_ip", "remote_addr", "remote_host"],
+    "datetime": ["datetime", "date_time", "timestamp", "time", "date"],
+    "url": ["url", "request_uri", "uri", "path", "request_url", "request"],
+    "method": ["method", "request_method", "http_method"],
+    "status": ["status", "status_code", "http_status", "response_code", "code"],
+    "size": ["size", "bytes", "body_bytes_sent", "response_size", "bytes_sent"],
+    "user_agent": ["user_agent", "useragent", "http_user_agent", "ua"],
+    "referer": ["referer", "referrer", "http_referer"],
+    "host": ["host", "server_name", "hostname", "vhost"],
+    "protocol": ["protocol", "http_protocol", "server_protocol"],
+}
+
+
+def _find_csv_column(headers: list, field: str) -> Optional[str]:
+    """Find the actual CSV column name matching a logical field."""
+    candidates = _CSV_COL_MAP.get(field, [field])
+    headers_lower = {h.lower().strip(): h for h in headers}
+    for candidate in candidates:
+        if candidate.lower() in headers_lower:
+            return headers_lower[candidate.lower()]
+    return None
+
+
+def detect_file_format(file_path: str) -> str:
+    """
+    Detect whether a file is a raw Apache log or a structured CSV log.
+    Returns 'csv_log' or 'raw_log'.
+    """
+    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+        first_line = f.readline().strip()
+
+    # If first line looks like a CSV header (contains commas and known column names)
+    if "," in first_line:
+        lower = first_line.lower().replace('"', '').replace("'", "")
+        csv_indicators = ["user_agent", "useragent", "http_user_agent", "status", "url", "ip", "datetime"]
+        matches = sum(1 for ind in csv_indicators if ind in lower)
+        if matches >= 3:
+            return "csv_log"
+
+    return "raw_log"
+
+
+def _parse_csv_status_size(raw_value: str) -> Tuple[Optional[int], Optional[int]]:
+    """
+    Parse a status field that may contain both status code and size merged.
+    Handles: "200", " 200 541 ", "200 541", "404", etc.
+    """
+    parts = raw_value.strip().split()
+    status = None
+    size = None
+    if len(parts) >= 1:
+        try:
+            status = int(parts[0])
+        except ValueError:
+            pass
+    if len(parts) >= 2:
+        try:
+            size = int(parts[1])
+        except ValueError:
+            pass
+    return status, size
+
+
+def parse_csv_log_line(row: dict, col_map: dict) -> Optional[Dict[str, Any]]:
+    """
+    Parse a single CSV row into a log dict.
+    Returns None if unparseable or not a relevant bot.
+    col_map: {field_name: actual_csv_column_name}
+
+    Handles shifted columns: when status+size are merged into one field,
+    the CSV has fewer data columns than headers, causing DictReader to shift
+    referer->user_agent and user_agent->None.
+    """
+    user_agent = (row.get(col_map.get("user_agent", "")) or "").strip()
+
+    # Handle shifted columns: if user_agent is empty, the referer column
+    # may actually contain the user_agent (status+size merged = 1 fewer col)
+    if not user_agent:
+        referer_col = col_map.get("referer", "")
+        candidate = (row.get(referer_col) or "").strip()
+        if candidate and ("Mozilla" in candidate or "bot" in candidate.lower()
+                          or "spider" in candidate.lower() or "http" not in candidate.lower()):
+            user_agent = candidate
+
+    if not user_agent:
+        return None
+
+    # Classify bot first (fast reject for non-bots)
+    bot_name, bot_family = classify_bot(user_agent)
+    if bot_name is None:
+        return None
+
+    # URL
+    url = (row.get(col_map.get("url", "")) or "").strip()
+    if not url:
+        return None
+
+    # IP
+    ip = (row.get(col_map.get("ip", "")) or "").strip()
+
+    # Timestamp
+    datetime_str = (row.get(col_map.get("datetime", "")) or "").strip()
+    timestamp = None
+    if datetime_str:
+        for fmt in [
+            "%d/%b/%Y:%H:%M:%S %z",    # 01/Jan/2026:00:00:02 +0000
+            "%d/%b/%Y:%H:%M:%S",        # 01/Jan/2026:00:00:02
+            "%Y-%m-%d %H:%M:%S",        # 2026-01-01 00:00:02
+            "%Y-%m-%dT%H:%M:%S",        # 2026-01-01T00:00:02
+            "%d/%m/%Y %H:%M:%S",        # 01/01/2026 00:00:02
+        ]:
+            try:
+                timestamp = datetime.strptime(datetime_str, fmt)
+                break
+            except ValueError:
+                continue
+        if timestamp is None:
+            # Try stripping timezone offset manually
+            try:
+                timestamp = datetime.strptime(datetime_str.split()[0], "%d/%b/%Y:%H:%M:%S")
+            except ValueError:
+                return None
+    else:
+        return None
+
+    # HTTP status and size - handle merged or separate columns
+    status_col = col_map.get("status", "")
+    size_col = col_map.get("size", "")
+    raw_status = (row.get(status_col) or "").strip()
+    raw_size = (row.get(size_col) or "").strip()
+
+    http_code = None
+    response_size = 0
+
+    if raw_status:
+        http_code, merged_size = _parse_csv_status_size(raw_status)
+        if merged_size is not None:
+            response_size = merged_size
+
+    # If we have a separate valid size column, use it
+    if raw_size:
+        try:
+            response_size = int(raw_size.strip())
+        except ValueError:
+            pass
+
+    return {
+        "ip": ip,
+        "timestamp": timestamp.replace(tzinfo=None) if timestamp.tzinfo else timestamp,
+        "url": url,
+        "http_code": http_code,
+        "response_size": response_size,
+        "user_agent": user_agent,
+        "crawler": bot_name,
+        "bot_family": bot_family,
+        "response_time": None,
+        "log_date": timestamp.date(),
+    }
+
+
+def stream_csv_log_file(file_path: str) -> Generator[Tuple[int, Optional[Dict]], None, None]:
+    """
+    Stream-parse a CSV log file line by line.
+    Auto-detects column mapping from header row.
+    Yields (line_number, parsed_data_or_None) for each line.
+    """
+    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames:
+            return
+
+        # Build column mapping
+        col_map = {}
+        for field in _CSV_COL_MAP:
+            found = _find_csv_column(list(reader.fieldnames), field)
+            if found:
+                col_map[field] = found
+
+        # Check we have minimum required columns
+        if "user_agent" not in col_map or "url" not in col_map:
+            return
+
+        for line_number, row in enumerate(reader, 2):  # line 2 = first data row
+            yield line_number, parse_csv_log_line(row, col_map)
 
 
 # --- Legacy parsers for Excel/CSV (kept for backward compatibility) ---

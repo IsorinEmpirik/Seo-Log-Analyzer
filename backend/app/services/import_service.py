@@ -7,7 +7,7 @@ import asyncio
 from sqlalchemy import text
 from app.core.database import SessionLocal
 from app.models.models import ImportFile, Log
-from app.services.log_parser import stream_log_file, count_lines
+from app.services.log_parser import stream_log_file, stream_csv_log_file, count_lines, detect_file_format
 
 # Global progress tracker: import_id -> progress dict
 _import_progress = {}
@@ -66,9 +66,16 @@ async def import_log_file(client_id: int, import_file_id: int, file_path: str):
                 existing_keys.add((str(row[0]), row[1], row[2]))
             loaded_dates.add(log_date)
 
-        # Phase 3: Stream parse and batch insert
+        # Phase 3: Detect format and pick the right parser
+        file_format = detect_file_format(file_path)
+        if file_format == "csv_log":
+            stream_fn = stream_csv_log_file
+        else:
+            stream_fn = stream_log_file
+
+        # Phase 4: Stream parse and batch insert
         batch = []
-        for line_num, parsed in stream_log_file(file_path):
+        for line_num, parsed in stream_fn(file_path):
             progress["processed_lines"] = line_num
             if total > 0:
                 progress["percent"] = min(99, int(line_num / total * 100))

@@ -196,7 +196,7 @@ export function Import({ client }: ImportProps) {
         >
           <input
             type="file"
-            accept=".log,.txt"
+            accept=".log,.txt,.csv"
             onChange={(e) => handleFileChange(e, 'log_file')}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             disabled={uploading || importProgress?.status === 'importing'}
@@ -204,7 +204,7 @@ export function Import({ client }: ImportProps) {
           <Terminal className="w-12 h-12 mx-auto text-purple-500 mb-4" />
           <h3 className="font-semibold text-text mb-2">Fichier Log serveur</h3>
           <p className="text-sm text-text-muted mb-4">
-            Apache/Nginx (.log, .txt) - Gros fichiers OK
+            Apache/Nginx (.log, .txt, .csv) - Gros fichiers OK
           </p>
           <span className="inline-block px-4 py-2 bg-purple-500 text-white rounded-lg text-sm font-medium">
             {uploading ? 'Upload en cours...' : 'Choisir un fichier'}
