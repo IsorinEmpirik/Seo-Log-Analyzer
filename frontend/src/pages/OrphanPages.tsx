@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Search, ExternalLink, AlertTriangle } from 'lucide-react';
-import { getOrphanPages, OrphanPage, Client } from '@/lib/api';
+import { getOrphanPages, getBotFamilies, OrphanPage, BotFamily, Client } from '@/lib/api';
 import { formatNumber, formatDateTime } from '@/lib/utils';
+import { BotFilter } from '@/components/BotFilter';
 
 interface OrphanPagesProps {
   client: Client | null;
@@ -12,12 +13,19 @@ export function OrphanPages({ client }: OrphanPagesProps) {
   const [filteredPages, setFilteredPages] = useState<OrphanPage[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [botFamilies, setBotFamilies] = useState<BotFamily[]>([]);
+  const [selectedFamily, setSelectedFamily] = useState<string | null>(null);
+  const [selectedBot, setSelectedBot] = useState<string | null>(null);
+
+  useEffect(() => {
+    getBotFamilies().then(setBotFamilies).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (client) {
       loadPages();
     }
-  }, [client]);
+  }, [client, selectedFamily, selectedBot]);
 
   useEffect(() => {
     if (search) {
@@ -31,7 +39,7 @@ export function OrphanPages({ client }: OrphanPagesProps) {
     if (!client) return;
     setLoading(true);
     try {
-      const data = await getOrphanPages(client.id);
+      const data = await getOrphanPages(client.id, selectedFamily || undefined, selectedBot || undefined);
       setPages(data);
       setFilteredPages(data);
     } catch (error) {
@@ -56,20 +64,31 @@ export function OrphanPages({ client }: OrphanPagesProps) {
         <div>
           <h1 className="text-2xl font-bold text-text">Pages Orphelines</h1>
           <p className="text-text-muted mt-1">
-            Pages crawlées par Googlebot mais absentes de l'export Screaming Frog
+            Pages crawlées par les bots mais absentes de l'export Screaming Frog
           </p>
         </div>
 
-        {/* Search */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
-          <input
-            type="text"
-            placeholder="Filtrer par URL..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-primary"
+        <div className="flex items-center gap-4">
+          {/* Bot filter */}
+          <BotFilter
+            families={botFamilies}
+            selectedFamily={selectedFamily}
+            selectedBot={selectedBot}
+            onFamilyChange={setSelectedFamily}
+            onBotChange={setSelectedBot}
           />
+
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+            <input
+              type="text"
+              placeholder="Filtrer par URL..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
         </div>
       </div>
 

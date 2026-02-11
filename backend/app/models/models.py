@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Date, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, Date, ForeignKey, Text, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.core.database import Base
@@ -12,9 +12,9 @@ class Client(Base):
     domain = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    import_files = relationship("ImportFile", back_populates="client")
-    logs = relationship("Log", back_populates="client")
-    screaming_frog_urls = relationship("ScreamingFrogUrl", back_populates="client")
+    import_files = relationship("ImportFile", back_populates="client", cascade="all, delete-orphan")
+    logs = relationship("Log", back_populates="client", cascade="all, delete-orphan")
+    screaming_frog_urls = relationship("ScreamingFrogUrl", back_populates="client", cascade="all, delete-orphan")
 
 
 class ImportFile(Base):
@@ -23,8 +23,14 @@ class ImportFile(Base):
     id = Column(Integer, primary_key=True, index=True)
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
     filename = Column(String(500), nullable=False)
-    file_type = Column(String(50))  # 'logs' or 'screaming_frog'
+    file_type = Column(String(50))  # 'logs', 'log_file', or 'screaming_frog'
     imported_at = Column(DateTime, default=datetime.utcnow)
+    total_lines = Column(Integer, default=0)
+    imported_lines = Column(Integer, default=0)
+    skipped_duplicates = Column(Integer, default=0)
+    skipped_filtered = Column(Integer, default=0)
+    status = Column(String(20), default="completed")  # pending, importing, completed, error
+    error_message = Column(Text, nullable=True)
 
     client = relationship("Client", back_populates="import_files")
     logs = relationship("Log", back_populates="import_file")
@@ -43,11 +49,20 @@ class Log(Base):
     http_code = Column(Integer, index=True)
     response_size = Column(Integer)
     user_agent = Column(Text)
-    crawler = Column(String(100), index=True)  # Googlebot, Bingbot, etc.
+    crawler = Column(String(100), index=True)       # Individual bot: "Googlebot", "GPTBot"
+    bot_family = Column(String(100), index=True)     # Family: "Google", "OpenAI"
+    response_time = Column(Integer)                  # Response time in microseconds
     log_date = Column(Date, index=True)
 
     import_file = relationship("ImportFile", back_populates="logs")
     client = relationship("Client", back_populates="logs")
+
+    __table_args__ = (
+        Index("ix_logs_dedup", "client_id", "timestamp", "ip", "url"),
+        Index("ix_logs_client_family", "client_id", "bot_family"),
+        Index("ix_logs_client_crawler", "client_id", "crawler"),
+        Index("ix_logs_client_date_family", "client_id", "log_date", "bot_family"),
+    )
 
 
 class ScreamingFrogUrl(Base):

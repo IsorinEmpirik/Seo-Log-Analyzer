@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ArrowRight, TrendingUp, TrendingDown, Minus } from 'lucide-react';
-import { comparePeriods, PeriodComparison, Client } from '@/lib/api';
+import { comparePeriods, getBotFamilies, PeriodComparison, BotFamily, Client } from '@/lib/api';
 import { formatNumber, getHttpCodeColor } from '@/lib/utils';
+import { BotFilter } from '@/components/BotFilter';
 
 interface CompareProps {
   client: Client | null;
@@ -15,6 +16,13 @@ export function Compare({ client }: CompareProps) {
   const [comparison, setComparison] = useState<PeriodComparison | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [botFamilies, setBotFamilies] = useState<BotFamily[]>([]);
+  const [selectedFamily, setSelectedFamily] = useState<string | null>(null);
+  const [selectedBot, setSelectedBot] = useState<string | null>(null);
+
+  useEffect(() => {
+    getBotFamilies().then(setBotFamilies).catch(() => {});
+  }, []);
 
   const handleCompare = async () => {
     if (!client || !periodAStart || !periodAEnd || !periodBStart || !periodBEnd) {
@@ -31,7 +39,9 @@ export function Compare({ client }: CompareProps) {
         periodAStart,
         periodAEnd,
         periodBStart,
-        periodBEnd
+        periodBEnd,
+        selectedFamily || undefined,
+        selectedBot || undefined,
       );
       setComparison(data);
     } catch (err) {
@@ -111,6 +121,17 @@ export function Compare({ client }: CompareProps) {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Bot filter */}
+        <div className="mt-6">
+          <BotFilter
+            families={botFamilies}
+            selectedFamily={selectedFamily}
+            selectedBot={selectedBot}
+            onFamilyChange={setSelectedFamily}
+            onBotChange={setSelectedBot}
+          />
         </div>
 
         {error && <p className="text-error text-sm mt-4">{error}</p>}

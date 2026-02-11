@@ -1,12 +1,24 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+import os
+import asyncio
+import json
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
-from app.core.database import get_db
+from app.core.database import get_db, DATA_DIR
 from app.models.models import ImportFile, Log, ScreamingFrogUrl, Client
 from app.schemas.schemas import ImportFile as ImportFileSchema
 from app.services.log_parser import parse_excel_logs, parse_screaming_frog_csv
+from app.services.import_service import import_log_file, get_import_progress, remove_import_progress
+from app.services.bot_registry import get_all_families
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
+
+
+@router.get("/bots/families")
+def get_bot_families():
+    """Return the list of bot families and individual bots for filtering."""
+    return get_all_families()
 
 
 @router.get("/{client_id}", response_model=List[ImportFileSchema])
@@ -20,6 +32,87 @@ def get_imports(client_id: int, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/log-file/{client_id}")
+async def upload_log_file(
+    client_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Upload a raw .log/.txt file for streaming background import."""
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    # Save uploaded file to disk (don't load 13M lines into memory)
+    upload_dir = os.path.join(DATA_DIR, "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    temp_path = os.path.join(upload_dir, f"import_{client_id}_{file.filename}")
+
+    with open(temp_path, "wb") as f:
+        while chunk := await file.read(1024 * 1024):  # 1MB chunks
+            f.write(chunk)
+
+    # Create import record
+    import_file = ImportFile(
+        client_id=client_id,
+        filename=file.filename,
+        file_type="log_file",
+        status="pending",
+    )
+    db.add(import_file)
+    db.commit()
+    db.refresh(import_file)
+
+    # Start background import task
+    asyncio.create_task(import_log_file(client_id, import_file.id, temp_path))
+
+    return {
+        "message": "Import started",
+        "import_id": import_file.id,
+    }
+
+
+@router.get("/progress/{import_id}")
+async def stream_progress(import_id: int):
+    """SSE endpoint for real-time import progress."""
+    async def event_generator():
+        last_data = None
+        retries = 0
+        while True:
+            progress = get_import_progress(import_id)
+            if progress is None:
+                retries += 1
+                if retries > 30:
+                    yield f"data: {json.dumps({'status': 'error', 'error': 'Import not found'})}\n\n"
+                    break
+                yield f"data: {json.dumps({'status': 'waiting'})}\n\n"
+                await asyncio.sleep(1)
+                continue
+
+            retries = 0
+            current_data = json.dumps(progress)
+            if current_data != last_data:
+                yield f"data: {current_data}\n\n"
+                last_data = current_data
+
+            if progress["status"] in ("completed", "error"):
+                await asyncio.sleep(1)
+                remove_import_progress(import_id)
+                break
+
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.post("/logs/{client_id}")
 async def upload_logs(
     client_id: int,
@@ -27,15 +120,12 @@ async def upload_logs(
     db: Session = Depends(get_db)
 ):
     """Upload Googlebot logs Excel file"""
-    # Verify client exists
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    # Read file
     content = await file.read()
 
-    # Parse logs
     try:
         logs = parse_excel_logs(content, file.filename)
     except Exception as e:
@@ -44,17 +134,18 @@ async def upload_logs(
     if not logs:
         raise HTTPException(status_code=400, detail="No valid logs found in file")
 
-    # Create import record
     import_file = ImportFile(
         client_id=client_id,
         filename=file.filename,
-        file_type="logs"
+        file_type="logs",
+        status="completed",
+        total_lines=len(logs),
+        imported_lines=len(logs),
     )
     db.add(import_file)
     db.commit()
     db.refresh(import_file)
 
-    # Insert logs
     for log_data in logs:
         log = Log(
             file_id=import_file.id,
@@ -79,15 +170,12 @@ async def upload_screaming_frog(
     db: Session = Depends(get_db)
 ):
     """Upload Screaming Frog CSV export"""
-    # Verify client exists
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    # Read file
     content = await file.read()
 
-    # Parse CSV
     try:
         urls = parse_screaming_frog_csv(content)
     except Exception as e:
@@ -99,17 +187,16 @@ async def upload_screaming_frog(
     # Delete existing SF data for this client (replace mode)
     db.query(ScreamingFrogUrl).filter(ScreamingFrogUrl.client_id == client_id).delete()
 
-    # Create import record
     import_file = ImportFile(
         client_id=client_id,
         filename=file.filename,
-        file_type="screaming_frog"
+        file_type="screaming_frog",
+        status="completed",
     )
     db.add(import_file)
     db.commit()
     db.refresh(import_file)
 
-    # Insert URLs
     for url_data in urls:
         sf_url = ScreamingFrogUrl(
             file_id=import_file.id,
@@ -134,8 +221,7 @@ def delete_import(file_id: int, db: Session = Depends(get_db)):
     if not import_file:
         raise HTTPException(status_code=404, detail="Import file not found")
 
-    # Delete associated data
-    if import_file.file_type == "logs":
+    if import_file.file_type in ("logs", "log_file"):
         db.query(Log).filter(Log.file_id == file_id).delete()
     elif import_file.file_type == "screaming_frog":
         db.query(ScreamingFrogUrl).filter(ScreamingFrogUrl.file_id == file_id).delete()

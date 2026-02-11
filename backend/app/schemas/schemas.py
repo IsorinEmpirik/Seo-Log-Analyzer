@@ -31,6 +31,12 @@ class ImportFile(ImportFileBase):
     id: int
     client_id: int
     imported_at: datetime
+    total_lines: Optional[int] = 0
+    imported_lines: Optional[int] = 0
+    skipped_duplicates: Optional[int] = 0
+    skipped_filtered: Optional[int] = 0
+    status: Optional[str] = "completed"
+    error_message: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -43,6 +49,9 @@ class LogBase(BaseModel):
     url: str
     http_code: Optional[int] = None
     response_size: Optional[int] = None
+    crawler: Optional[str] = None
+    bot_family: Optional[str] = None
+    response_time: Optional[int] = None
     log_date: Optional[date] = None
 
 
@@ -75,7 +84,7 @@ class TopPageStats(BaseModel):
 class DashboardStats(BaseModel):
     total_crawls: int
     unique_pages: int
-    avg_crawl_interval: Optional[float] = None  # Average days between crawls per page
+    avg_crawl_interval: Optional[float] = None
     date_range: dict
     http_codes: List[HttpCodeStats]
     daily_crawls: List[DailyCrawlStats]

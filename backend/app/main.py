@@ -3,20 +3,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.core.database import init_db
+from app.core.migrate import run_migrations
 from app.api import clients, imports, stats
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Initialize database
+    # Startup: Initialize database and run migrations
     init_db()
+    run_migrations()
     yield
     # Shutdown
 
 
 app = FastAPI(
     title="SEO Log Analyzer",
-    description="Analyze Googlebot crawl logs for SEO insights",
+    description="Analyze bot crawl logs for SEO insights",
     version="1.0.0",
     lifespan=lifespan
 )

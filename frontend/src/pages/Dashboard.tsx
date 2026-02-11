@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { BarChart3, FileText, AlertTriangle, TrendingUp, Clock } from 'lucide-react';
-import { getDashboardStats, DashboardStats, Client } from '@/lib/api';
+import { getDashboardStats, getBotFamilies, DashboardStats, BotFamily, Client } from '@/lib/api';
 import { StatCard } from '@/components/StatCard';
+import { BotFilter } from '@/components/BotFilter';
 import { CrawlLineChart, HttpCodeChart } from '@/components/Charts';
 import { formatNumber, formatDate, getHttpCodeColor, getHttpCodeLabel } from '@/lib/utils';
 
@@ -14,12 +15,19 @@ export function Dashboard({ client }: DashboardProps) {
   const [loading, setLoading] = useState(false);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [botFamilies, setBotFamilies] = useState<BotFamily[]>([]);
+  const [selectedFamily, setSelectedFamily] = useState<string | null>(null);
+  const [selectedBot, setSelectedBot] = useState<string | null>(null);
+
+  useEffect(() => {
+    getBotFamilies().then(setBotFamilies).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (client) {
       loadStats();
     }
-  }, [client, startDate, endDate]);
+  }, [client, startDate, endDate, selectedFamily, selectedBot]);
 
   const loadStats = async () => {
     if (!client) return;
@@ -28,7 +36,9 @@ export function Dashboard({ client }: DashboardProps) {
       const data = await getDashboardStats(
         client.id,
         startDate || undefined,
-        endDate || undefined
+        endDate || undefined,
+        selectedFamily || undefined,
+        selectedBot || undefined,
       );
       setStats(data);
     } catch (error) {
@@ -41,7 +51,7 @@ export function Dashboard({ client }: DashboardProps) {
   if (!client) {
     return (
       <div className="text-center py-12 text-text-muted">
-        Sélectionnez un client pour voir le dashboard
+        Selectionnez un client pour voir le dashboard
       </div>
     );
   }
@@ -55,7 +65,7 @@ export function Dashboard({ client }: DashboardProps) {
   if (!stats) {
     return (
       <div className="text-center py-12 text-text-muted">
-        Aucune donnée disponible. Importez des logs pour commencer.
+        Aucune donnee disponible. Importez des logs pour commencer.
       </div>
     );
   }
@@ -65,8 +75,15 @@ export function Dashboard({ client }: DashboardProps) {
 
   return (
     <div className="space-y-6">
-      {/* Date filters */}
+      {/* Filters */}
       <div className="flex flex-wrap gap-4 items-center">
+        <BotFilter
+          families={botFamilies}
+          selectedFamily={selectedFamily}
+          selectedBot={selectedBot}
+          onFamilyChange={setSelectedFamily}
+          onBotChange={setSelectedBot}
+        />
         <div className="flex items-center gap-2">
           <label className="text-sm text-text-muted">Du:</label>
           <input
@@ -93,12 +110,12 @@ export function Dashboard({ client }: DashboardProps) {
             }}
             className="text-sm text-primary hover:underline"
           >
-            Réinitialiser
+            Reset dates
           </button>
         )}
         {stats.date_range.start && (
           <span className="text-sm text-text-muted ml-auto">
-            Données: {formatDate(stats.date_range.start)} - {formatDate(stats.date_range.end!)}
+            Donnees: {formatDate(stats.date_range.start)} - {formatDate(stats.date_range.end!)}
           </span>
         )}
       </div>
@@ -125,7 +142,7 @@ export function Dashboard({ client }: DashboardProps) {
           icon={<TrendingUp className="w-6 h-6" />}
         />
         <StatCard
-          title="Crawlée tous les"
+          title="Crawlee tous les"
           value={
             stats.avg_crawl_interval != null
               ? `${stats.avg_crawl_interval} j`
@@ -144,13 +161,10 @@ export function Dashboard({ client }: DashboardProps) {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Crawl frequency chart */}
         <div className="lg:col-span-2 bg-surface rounded-xl border border-gray-200 p-6">
-          <h3 className="font-semibold text-text mb-4">Fréquence de Crawl</h3>
+          <h3 className="font-semibold text-text mb-4">Frequence de Crawl</h3>
           <CrawlLineChart data={stats.daily_crawls} />
         </div>
-
-        {/* HTTP codes chart */}
         <div className="bg-surface rounded-xl border border-gray-200 p-6">
           <h3 className="font-semibold text-text mb-4">Codes HTTP</h3>
           <HttpCodeChart data={stats.http_codes} />
@@ -159,7 +173,7 @@ export function Dashboard({ client }: DashboardProps) {
 
       {/* HTTP Code Details */}
       <div className="bg-surface rounded-xl border border-gray-200 p-6">
-        <h3 className="font-semibold text-text mb-4">Détail des Codes HTTP</h3>
+        <h3 className="font-semibold text-text mb-4">Detail des Codes HTTP</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
           {stats.http_codes.map((code) => (
             <div
@@ -184,7 +198,7 @@ export function Dashboard({ client }: DashboardProps) {
 
       {/* Top Pages */}
       <div className="bg-surface rounded-xl border border-gray-200 p-6">
-        <h3 className="font-semibold text-text mb-4">Top 20 Pages Crawlées</h3>
+        <h3 className="font-semibold text-text mb-4">Top 20 Pages Crawlees</h3>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>

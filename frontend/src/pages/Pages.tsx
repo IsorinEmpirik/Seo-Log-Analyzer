@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
-import { getPages, PageStats, Client } from '@/lib/api';
+import { getPages, getBotFamilies, PageStats, BotFamily, Client } from '@/lib/api';
 import { formatNumber, formatDateTime, getHttpCodeColor } from '@/lib/utils';
+import { BotFilter } from '@/components/BotFilter';
 
 interface PagesProps {
   client: Client | null;
@@ -23,14 +24,21 @@ export function Pages({ client }: PagesProps) {
   const [search, setSearch] = useState('');
   const [httpCode, setHttpCode] = useState<number | undefined>(undefined);
   const [offset, setOffset] = useState(0);
+  const [botFamilies, setBotFamilies] = useState<BotFamily[]>([]);
+  const [selectedFamily, setSelectedFamily] = useState<string | null>(null);
+  const [selectedBot, setSelectedBot] = useState<string | null>(null);
   const limit = 50;
+
+  useEffect(() => {
+    getBotFamilies().then(setBotFamilies).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (client) {
       setOffset(0);
       loadPages();
     }
-  }, [client, search, httpCode]);
+  }, [client, search, httpCode, selectedFamily, selectedBot]);
 
   useEffect(() => {
     if (client) {
@@ -47,6 +55,8 @@ export function Pages({ client }: PagesProps) {
         httpCode,
         limit,
         offset,
+        botFamily: selectedFamily || undefined,
+        crawler: selectedBot || undefined,
       });
       setPages(data.pages);
       setTotal(data.total);
@@ -79,7 +89,7 @@ export function Pages({ client }: PagesProps) {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4">
+      <div className="flex flex-col sm:flex-row gap-4 items-center">
         {/* Search */}
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
@@ -91,6 +101,15 @@ export function Pages({ client }: PagesProps) {
             className="pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
+
+        {/* Bot filter */}
+        <BotFilter
+          families={botFamilies}
+          selectedFamily={selectedFamily}
+          selectedBot={selectedBot}
+          onFamilyChange={setSelectedFamily}
+          onBotChange={setSelectedBot}
+        />
 
         {/* HTTP Code filter */}
         <select

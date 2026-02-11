@@ -10,11 +10,22 @@ from app.schemas.schemas import (
 )
 
 
+def _apply_bot_filters(query, bot_family: Optional[str], crawler: Optional[str]):
+    """Apply bot family and/or individual crawler filters to a query."""
+    if bot_family:
+        query = query.filter(Log.bot_family == bot_family)
+    if crawler:
+        query = query.filter(Log.crawler == crawler)
+    return query
+
+
 def get_dashboard_stats(
     db: Session,
     client_id: int,
     start_date: Optional[date] = None,
-    end_date: Optional[date] = None
+    end_date: Optional[date] = None,
+    bot_family: Optional[str] = None,
+    crawler: Optional[str] = None,
 ) -> DashboardStats:
     """Get main dashboard statistics"""
 
@@ -24,6 +35,8 @@ def get_dashboard_stats(
         query = query.filter(Log.log_date >= start_date)
     if end_date:
         query = query.filter(Log.log_date <= end_date)
+
+    query = _apply_bot_filters(query, bot_family, crawler)
 
     # Total crawls
     total_crawls = query.count()
@@ -82,13 +95,11 @@ def get_dashboard_stats(
         for url, count in top_pages_raw
     ]
 
-    # Average crawl interval: on average, each page is crawled every X days
+    # Average crawl interval
     avg_crawl_interval = None
     if min_date and max_date and min_date != max_date and unique_pages and unique_pages > 0:
         total_days = (max_date - min_date).days
         if total_days > 0:
-            # For each page: interval = total_days / crawl_count
-            # Average across all pages
             page_crawl_counts = (
                 query
                 .with_entities(Log.url, func.count(Log.id).label('count'))
@@ -110,19 +121,26 @@ def get_dashboard_stats(
     )
 
 
-def get_orphan_pages(db: Session, client_id: int) -> List[OrphanPage]:
+def get_orphan_pages(
+    db: Session,
+    client_id: int,
+    bot_family: Optional[str] = None,
+    crawler: Optional[str] = None,
+) -> List[OrphanPage]:
     """
-    Find pages crawled by Googlebot but not in Screaming Frog export.
+    Find pages crawled by bots but not in Screaming Frog export.
     Only pages whose most recent crawl returned HTTP 200.
     """
-    # Get all URLs from logs with total count, last crawl timestamp, and last HTTP code
     from sqlalchemy import case
     from sqlalchemy.sql import literal_column
 
+    base_query = db.query(Log).filter(Log.client_id == client_id)
+    base_query = _apply_bot_filters(base_query, bot_family, crawler)
+
     # Subquery: for each URL, get the timestamp of the most recent crawl
     latest_ts_subq = (
-        db.query(Log.url, func.max(Log.timestamp).label('max_ts'))
-        .filter(Log.client_id == client_id)
+        base_query
+        .with_entities(Log.url, func.max(Log.timestamp).label('max_ts'))
         .group_by(Log.url)
         .subquery()
     )
@@ -138,14 +156,13 @@ def get_orphan_pages(db: Session, client_id: int) -> List[OrphanPage]:
 
     # Get all URLs with their stats
     log_urls = (
-        db.query(Log.url, func.count(Log.id).label('count'), func.max(Log.timestamp).label('last'))
-        .filter(Log.client_id == client_id)
+        base_query
+        .with_entities(Log.url, func.count(Log.id).label('count'), func.max(Log.timestamp).label('last'))
         .group_by(Log.url)
         .all()
     )
 
     # Get all URLs from Screaming Frog, normalized to path only
-    # SF stores full URLs like https://domain.com/path, logs store /path
     sf_paths = set()
     for (url,) in db.query(ScreamingFrogUrl.url).filter(ScreamingFrogUrl.client_id == client_id).all():
         parsed = urlparse(url)
@@ -154,14 +171,13 @@ def get_orphan_pages(db: Session, client_id: int) -> List[OrphanPage]:
             path = '/'
         sf_paths.add(path)
 
-    # Find orphans: log URLs not in SF, and whose last crawl was 200
+    # Find orphans
     orphans = []
     for url, count, last_crawl in log_urls:
         normalized_url = url.rstrip('/')
         if not normalized_url:
             normalized_url = '/'
 
-        # Only include if last HTTP code is 200
         if last_code_map.get(url) != 200:
             continue
 
@@ -181,7 +197,9 @@ def compare_periods(
     period_a_start: date,
     period_a_end: date,
     period_b_start: date,
-    period_b_end: date
+    period_b_end: date,
+    bot_family: Optional[str] = None,
+    crawler: Optional[str] = None,
 ) -> PeriodComparison:
     """Compare stats between two time periods"""
 
@@ -192,6 +210,7 @@ def compare_periods(
             .filter(Log.log_date >= start)
             .filter(Log.log_date <= end)
         )
+        query = _apply_bot_filters(query, bot_family, crawler)
 
         total = query.count()
         unique = query.with_entities(func.count(distinct(Log.url))).scalar()
@@ -237,17 +256,19 @@ def get_page_frequency(
     db: Session,
     client_id: int,
     url: Optional[str] = None,
-    group_by: str = "day"  # day, week
+    group_by: str = "day",
+    bot_family: Optional[str] = None,
+    crawler: Optional[str] = None,
 ) -> List[dict]:
     """Get crawl frequency for a specific page or all pages"""
 
     query = db.query(Log).filter(Log.client_id == client_id)
+    query = _apply_bot_filters(query, bot_family, crawler)
 
     if url:
         query = query.filter(Log.url == url)
 
     if group_by == "week":
-        # Group by week
         results = (
             query
             .with_entities(
@@ -259,7 +280,6 @@ def get_page_frequency(
             .all()
         )
     else:
-        # Group by day
         results = (
             query
             .with_entities(Log.log_date, func.count(Log.id).label('count'))

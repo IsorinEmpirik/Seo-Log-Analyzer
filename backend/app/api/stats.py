@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from datetime import date
 from typing import Optional, List
 from app.core.database import get_db
+from app.models.models import Log
 from app.schemas.schemas import DashboardStats, OrphanPage, PeriodComparison
 from app.services.stats_service import (
     get_dashboard_stats,
@@ -19,16 +21,23 @@ def dashboard(
     client_id: int,
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
+    bot_family: Optional[str] = Query(None),
+    crawler: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     """Get main dashboard statistics"""
-    return get_dashboard_stats(db, client_id, start_date, end_date)
+    return get_dashboard_stats(db, client_id, start_date, end_date, bot_family, crawler)
 
 
 @router.get("/{client_id}/orphan-pages", response_model=List[OrphanPage])
-def orphan_pages(client_id: int, db: Session = Depends(get_db)):
-    """Get pages crawled by Googlebot but not found in Screaming Frog"""
-    return get_orphan_pages(db, client_id)
+def orphan_pages(
+    client_id: int,
+    bot_family: Optional[str] = Query(None),
+    crawler: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Get pages crawled by bots but not found in Screaming Frog"""
+    return get_orphan_pages(db, client_id, bot_family, crawler)
 
 
 @router.get("/{client_id}/compare")
@@ -38,13 +47,16 @@ def compare(
     period_a_end: date = Query(...),
     period_b_start: date = Query(...),
     period_b_end: date = Query(...),
+    bot_family: Optional[str] = Query(None),
+    crawler: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     """Compare statistics between two time periods"""
     return compare_periods(
         db, client_id,
         period_a_start, period_a_end,
-        period_b_start, period_b_end
+        period_b_start, period_b_end,
+        bot_family, crawler
     )
 
 
@@ -53,10 +65,48 @@ def frequency(
     client_id: int,
     url: Optional[str] = Query(None),
     group_by: str = Query("day", regex="^(day|week)$"),
+    bot_family: Optional[str] = Query(None),
+    crawler: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     """Get crawl frequency for a page or all pages"""
-    return get_page_frequency(db, client_id, url, group_by)
+    return get_page_frequency(db, client_id, url, group_by, bot_family, crawler)
+
+
+@router.get("/{client_id}/bot-distribution")
+def bot_distribution(
+    client_id: int,
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Get crawl distribution by bot family and individual bot."""
+    query = db.query(Log).filter(Log.client_id == client_id)
+    if start_date:
+        query = query.filter(Log.log_date >= start_date)
+    if end_date:
+        query = query.filter(Log.log_date <= end_date)
+
+    families = (
+        query
+        .with_entities(Log.bot_family, func.count(Log.id))
+        .group_by(Log.bot_family)
+        .order_by(func.count(Log.id).desc())
+        .all()
+    )
+
+    bots = (
+        query
+        .with_entities(Log.crawler, Log.bot_family, func.count(Log.id))
+        .group_by(Log.crawler, Log.bot_family)
+        .order_by(func.count(Log.id).desc())
+        .all()
+    )
+
+    return {
+        "families": [{"family": f, "count": c} for f, c in families if f],
+        "bots": [{"bot": b, "family": f, "count": c} for b, f, c in bots if b],
+    }
 
 
 @router.get("/{client_id}/pages")
@@ -66,16 +116,21 @@ def get_pages(
     search: Optional[str] = Query(None),
     limit: int = Query(100),
     offset: int = Query(0),
+    bot_family: Optional[str] = Query(None),
+    crawler: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     """Get list of crawled pages with filters"""
-    from sqlalchemy import func, distinct
-    from app.models.models import Log
-
     # Get total date range to compute crawl intervals
+    base_query = db.query(Log).filter(Log.client_id == client_id)
+    if bot_family:
+        base_query = base_query.filter(Log.bot_family == bot_family)
+    if crawler:
+        base_query = base_query.filter(Log.crawler == crawler)
+
     date_range = (
-        db.query(func.min(Log.log_date), func.max(Log.log_date))
-        .filter(Log.client_id == client_id)
+        base_query
+        .with_entities(func.min(Log.log_date), func.max(Log.log_date))
         .first()
     )
     total_days = 0
@@ -83,13 +138,13 @@ def get_pages(
         total_days = (date_range[1] - date_range[0]).days
 
     query = (
-        db.query(
+        base_query
+        .with_entities(
             Log.url,
             func.count(Log.id).label('crawl_count'),
             func.max(Log.timestamp).label('last_crawl'),
             Log.http_code
         )
-        .filter(Log.client_id == client_id)
         .group_by(Log.url)
     )
 
