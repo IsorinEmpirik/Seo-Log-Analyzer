@@ -3,6 +3,8 @@ import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getPages, getBotFamilies, PageStats, BotFamily, Client } from '@/lib/api';
 import { formatNumber, formatDateTime, getHttpCodeColor } from '@/lib/utils';
 import { BotFilter } from '@/components/BotFilter';
+import { PageTypeFilter } from '@/components/PageTypeFilter';
+import { useDebounce } from '@/hooks/useDebounce';
 
 interface PagesProps {
   client: Client | null;
@@ -23,11 +25,14 @@ export function Pages({ client }: PagesProps) {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [httpCode, setHttpCode] = useState<number | undefined>(undefined);
+  const [pageType, setPageType] = useState<string | undefined>(undefined);
   const [offset, setOffset] = useState(0);
   const [botFamilies, setBotFamilies] = useState<BotFamily[]>([]);
   const [selectedFamily, setSelectedFamily] = useState<string | null>(null);
   const [selectedBot, setSelectedBot] = useState<string | null>(null);
   const limit = 50;
+
+  const debouncedSearch = useDebounce(search, 400);
 
   useEffect(() => {
     getBotFamilies().then(setBotFamilies).catch(() => {});
@@ -38,7 +43,7 @@ export function Pages({ client }: PagesProps) {
       setOffset(0);
       loadPages();
     }
-  }, [client, search, httpCode, selectedFamily, selectedBot]);
+  }, [client, debouncedSearch, httpCode, pageType, selectedFamily, selectedBot]);
 
   useEffect(() => {
     if (client) {
@@ -51,8 +56,9 @@ export function Pages({ client }: PagesProps) {
     setLoading(true);
     try {
       const data = await getPages(client.id, {
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         httpCode,
+        pageType,
         limit,
         offset,
         botFamily: selectedFamily || undefined,
@@ -109,6 +115,13 @@ export function Pages({ client }: PagesProps) {
           selectedBot={selectedBot}
           onFamilyChange={setSelectedFamily}
           onBotChange={setSelectedBot}
+        />
+
+        {/* Page type filter */}
+        <PageTypeFilter
+          client={client}
+          value={pageType}
+          onChange={setPageType}
         />
 
         {/* HTTP Code filter */}

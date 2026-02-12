@@ -23,21 +23,26 @@ def dashboard(
     end_date: Optional[date] = Query(None),
     bot_family: Optional[str] = Query(None),
     crawler: Optional[str] = Query(None),
+    page_type: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     """Get main dashboard statistics"""
-    return get_dashboard_stats(db, client_id, start_date, end_date, bot_family, crawler)
+    return get_dashboard_stats(db, client_id, start_date, end_date, bot_family, crawler, page_type)
 
 
-@router.get("/{client_id}/orphan-pages", response_model=List[OrphanPage])
+@router.get("/{client_id}/orphan-pages")
 def orphan_pages(
     client_id: int,
     bot_family: Optional[str] = Query(None),
     crawler: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    page_type: Optional[str] = Query(None),
+    limit: int = Query(100),
+    offset: int = Query(0),
     db: Session = Depends(get_db),
 ):
     """Get pages crawled by bots but not found in Screaming Frog"""
-    return get_orphan_pages(db, client_id, bot_family, crawler)
+    return get_orphan_pages(db, client_id, bot_family, crawler, search, page_type, limit, offset)
 
 
 @router.get("/{client_id}/compare")
@@ -109,11 +114,29 @@ def bot_distribution(
     }
 
 
+@router.get("/{client_id}/page-types")
+def page_types(
+    client_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get available page types with counts for a client"""
+    results = (
+        db.query(Log.page_type, func.count(Log.id))
+        .filter(Log.client_id == client_id)
+        .filter(Log.page_type.isnot(None))
+        .group_by(Log.page_type)
+        .order_by(func.count(Log.id).desc())
+        .all()
+    )
+    return [{"type": t, "count": c} for t, c in results]
+
+
 @router.get("/{client_id}/pages")
 def get_pages(
     client_id: int,
     http_code: Optional[int] = Query(None),
     search: Optional[str] = Query(None),
+    page_type: Optional[str] = Query(None),
     limit: int = Query(100),
     offset: int = Query(0),
     bot_family: Optional[str] = Query(None),
@@ -127,6 +150,8 @@ def get_pages(
         base_query = base_query.filter(Log.bot_family == bot_family)
     if crawler:
         base_query = base_query.filter(Log.crawler == crawler)
+    if page_type:
+        base_query = base_query.filter(Log.page_type == page_type)
 
     date_range = (
         base_query

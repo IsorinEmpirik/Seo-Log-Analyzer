@@ -3,6 +3,7 @@ import { BarChart3, FileText, AlertTriangle, TrendingUp, Clock } from 'lucide-re
 import { getDashboardStats, getBotFamilies, DashboardStats, BotFamily, Client } from '@/lib/api';
 import { StatCard } from '@/components/StatCard';
 import { BotFilter } from '@/components/BotFilter';
+import { PageTypeFilter } from '@/components/PageTypeFilter';
 import { CrawlLineChart, HttpCodeChart } from '@/components/Charts';
 import { formatNumber, formatDate, getHttpCodeColor, getHttpCodeLabel } from '@/lib/utils';
 
@@ -18,6 +19,7 @@ export function Dashboard({ client }: DashboardProps) {
   const [botFamilies, setBotFamilies] = useState<BotFamily[]>([]);
   const [selectedFamily, setSelectedFamily] = useState<string | null>(null);
   const [selectedBot, setSelectedBot] = useState<string | null>(null);
+  const [pageType, setPageType] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     getBotFamilies().then(setBotFamilies).catch(() => {});
@@ -27,7 +29,7 @@ export function Dashboard({ client }: DashboardProps) {
     if (client) {
       loadStats();
     }
-  }, [client, startDate, endDate, selectedFamily, selectedBot]);
+  }, [client, startDate, endDate, selectedFamily, selectedBot, pageType]);
 
   const loadStats = async () => {
     if (!client) return;
@@ -39,6 +41,7 @@ export function Dashboard({ client }: DashboardProps) {
         endDate || undefined,
         selectedFamily || undefined,
         selectedBot || undefined,
+        pageType,
       );
       setStats(data);
     } catch (error) {
@@ -83,6 +86,11 @@ export function Dashboard({ client }: DashboardProps) {
           selectedBot={selectedBot}
           onFamilyChange={setSelectedFamily}
           onBotChange={setSelectedBot}
+        />
+        <PageTypeFilter
+          client={client}
+          value={pageType}
+          onChange={setPageType}
         />
         <div className="flex items-center gap-2">
           <label className="text-sm text-text-muted">Du:</label>

@@ -53,6 +53,7 @@ class Log(Base):
     bot_family = Column(String(100), index=True)     # Family: "Google", "OpenAI"
     response_time = Column(Integer)                  # Response time in microseconds
     log_date = Column(Date, index=True)
+    page_type = Column(String(20), index=True)         # "page", "javascript", "css", "image", "font", "xml", "other"
 
     import_file = relationship("ImportFile", back_populates="logs")
     client = relationship("Client", back_populates="logs")
@@ -62,6 +63,10 @@ class Log(Base):
         Index("ix_logs_client_family", "client_id", "bot_family"),
         Index("ix_logs_client_crawler", "client_id", "crawler"),
         Index("ix_logs_client_date_family", "client_id", "log_date", "bot_family"),
+        Index("ix_logs_client_date", "client_id", "log_date"),
+        Index("ix_logs_client_url", "client_id", "url"),
+        Index("ix_logs_client_http_code", "client_id", "http_code"),
+        Index("ix_logs_client_page_type", "client_id", "page_type"),
     )
 
 

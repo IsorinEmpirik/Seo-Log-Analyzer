@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Search, ExternalLink, AlertTriangle } from 'lucide-react';
+import { Search, ExternalLink, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getOrphanPages, getBotFamilies, OrphanPage, BotFamily, Client } from '@/lib/api';
 import { formatNumber, formatDateTime } from '@/lib/utils';
 import { BotFilter } from '@/components/BotFilter';
+import { PageTypeFilter } from '@/components/PageTypeFilter';
+import { useDebounce } from '@/hooks/useDebounce';
 
 interface OrphanPagesProps {
   client: Client | null;
@@ -10,12 +12,17 @@ interface OrphanPagesProps {
 
 export function OrphanPages({ client }: OrphanPagesProps) {
   const [pages, setPages] = useState<OrphanPage[]>([]);
-  const [filteredPages, setFilteredPages] = useState<OrphanPage[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [pageType, setPageType] = useState<string | undefined>(undefined);
+  const [offset, setOffset] = useState(0);
   const [botFamilies, setBotFamilies] = useState<BotFamily[]>([]);
   const [selectedFamily, setSelectedFamily] = useState<string | null>(null);
   const [selectedBot, setSelectedBot] = useState<string | null>(null);
+  const limit = 50;
+
+  const debouncedSearch = useDebounce(search, 400);
 
   useEffect(() => {
     getBotFamilies().then(setBotFamilies).catch(() => {});
@@ -23,31 +30,40 @@ export function OrphanPages({ client }: OrphanPagesProps) {
 
   useEffect(() => {
     if (client) {
+      setOffset(0);
       loadPages();
     }
-  }, [client, selectedFamily, selectedBot]);
+  }, [client, debouncedSearch, pageType, selectedFamily, selectedBot]);
 
   useEffect(() => {
-    if (search) {
-      setFilteredPages(pages.filter((p) => p.url.toLowerCase().includes(search.toLowerCase())));
-    } else {
-      setFilteredPages(pages);
+    if (client) {
+      loadPages();
     }
-  }, [search, pages]);
+  }, [offset]);
 
   const loadPages = async () => {
     if (!client) return;
     setLoading(true);
     try {
-      const data = await getOrphanPages(client.id, selectedFamily || undefined, selectedBot || undefined);
-      setPages(data);
-      setFilteredPages(data);
+      const data = await getOrphanPages(client.id, {
+        botFamily: selectedFamily || undefined,
+        crawler: selectedBot || undefined,
+        search: debouncedSearch || undefined,
+        pageType,
+        limit,
+        offset,
+      });
+      setPages(data.orphans);
+      setTotal(data.total);
     } catch (error) {
       console.error('Failed to load orphan pages:', error);
     } finally {
       setLoading(false);
     }
   };
+
+  const totalPages = Math.ceil(total / limit);
+  const currentPage = Math.floor(offset / limit) + 1;
 
   if (!client) {
     return (
@@ -76,6 +92,13 @@ export function OrphanPages({ client }: OrphanPagesProps) {
             selectedBot={selectedBot}
             onFamilyChange={setSelectedFamily}
             onBotChange={setSelectedBot}
+          />
+
+          {/* Page type filter */}
+          <PageTypeFilter
+            client={client}
+            value={pageType}
+            onChange={setPageType}
           />
 
           {/* Search */}
@@ -108,28 +131,49 @@ export function OrphanPages({ client }: OrphanPagesProps) {
       {/* Results */}
       {loading ? (
         <div className="text-center py-12 text-text-muted">Chargement...</div>
-      ) : filteredPages.length === 0 ? (
+      ) : total === 0 ? (
         <div className="bg-surface rounded-xl border border-gray-200 p-12 text-center">
           <div className="w-16 h-16 bg-success/10 rounded-full flex items-center justify-center mx-auto mb-4">
             <Search className="w-8 h-8 text-success" />
           </div>
           <h3 className="font-semibold text-text mb-2">
-            {pages.length === 0
+            {!debouncedSearch && !pageType
               ? 'Aucune page orpheline détectée'
-              : 'Aucun résultat pour cette recherche'}
+              : 'Aucun résultat pour ces filtres'}
           </h3>
           <p className="text-text-muted">
-            {pages.length === 0
+            {!debouncedSearch && !pageType
               ? "Importez un export Screaming Frog pour détecter les pages orphelines."
-              : "Essayez une autre recherche."}
+              : "Essayez d'autres filtres."}
           </p>
         </div>
       ) : (
         <div className="bg-surface rounded-xl border border-gray-200">
-          <div className="p-4 border-b border-gray-100">
+          <div className="p-4 border-b border-gray-100 flex items-center justify-between">
             <span className="text-sm text-text-muted">
-              {formatNumber(filteredPages.length)} page(s) orpheline(s) trouvée(s)
+              {formatNumber(total)} page(s) orpheline(s) trouvée(s)
             </span>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setOffset(Math.max(0, offset - limit))}
+                  disabled={offset === 0}
+                  className="p-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <span className="text-sm text-text-muted">
+                  Page {currentPage} / {totalPages}
+                </span>
+                <button
+                  onClick={() => setOffset(offset + limit)}
+                  disabled={currentPage >= totalPages}
+                  className="p-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </div>
+            )}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -141,7 +185,7 @@ export function OrphanPages({ client }: OrphanPagesProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {filteredPages.map((page) => (
+                {pages.map((page) => (
                   <tr key={page.url} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
