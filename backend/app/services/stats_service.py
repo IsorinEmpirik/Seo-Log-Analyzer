@@ -193,8 +193,19 @@ def get_orphan_pages(
             continue
 
         if normalized_url not in sf_paths:
+            # Exclude noise: feeds, xml, query strings, wp-content
+            url_lower = url.lower()
+            if '/feed' in url_lower:
+                continue
+            if url_lower.split('?')[0].endswith('.xml'):
+                continue
+            if '?' in url:
+                continue
+            if 'wp-content' in url_lower:
+                continue
+
             # Apply search filter
-            if search and search.lower() not in url.lower():
+            if search and search.lower() not in url_lower:
                 continue
             orphans.append(OrphanPage(
                 url=url,
