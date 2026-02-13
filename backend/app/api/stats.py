@@ -131,6 +131,25 @@ def page_types(
     return [{"type": t, "count": c} for t, c in results]
 
 
+@router.get("/{client_id}/date-range")
+def get_date_range(
+    client_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get the min and max log dates for a client"""
+    result = (
+        db.query(func.min(Log.log_date), func.max(Log.log_date))
+        .filter(Log.client_id == client_id)
+        .first()
+    )
+    if result and result[0] and result[1]:
+        return {
+            "min_date": result[0].isoformat(),
+            "max_date": result[1].isoformat(),
+        }
+    return {"min_date": None, "max_date": None}
+
+
 @router.get("/{client_id}/pages")
 def get_pages(
     client_id: int,
@@ -141,6 +160,8 @@ def get_pages(
     offset: int = Query(0),
     bot_family: Optional[str] = Query(None),
     crawler: Optional[str] = Query(None),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
     db: Session = Depends(get_db)
 ):
     """Get list of crawled pages with filters"""
@@ -152,6 +173,10 @@ def get_pages(
         base_query = base_query.filter(Log.crawler == crawler)
     if page_type:
         base_query = base_query.filter(Log.page_type == page_type)
+    if start_date:
+        base_query = base_query.filter(Log.log_date >= start_date)
+    if end_date:
+        base_query = base_query.filter(Log.log_date <= end_date)
 
     date_range = (
         base_query

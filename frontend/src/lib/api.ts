@@ -218,6 +218,8 @@ export const getPages = (clientId: number, options?: {
   offset?: number;
   botFamily?: string;
   crawler?: string;
+  startDate?: string;
+  endDate?: string;
 }) => {
   const params = new URLSearchParams();
   if (options?.httpCode) params.append('http_code', String(options.httpCode));
@@ -227,8 +229,13 @@ export const getPages = (clientId: number, options?: {
   if (options?.offset) params.append('offset', String(options.offset));
   if (options?.botFamily) params.append('bot_family', options.botFamily);
   if (options?.crawler) params.append('crawler', options.crawler);
+  if (options?.startDate) params.append('start_date', options.startDate);
+  if (options?.endDate) params.append('end_date', options.endDate);
   return fetchApi<{ total: number; pages: PageStats[] }>(`/stats/${clientId}/pages?${params}`);
 };
+
+export const getDateRange = (clientId: number) =>
+  fetchApi<DateRange>(`/stats/${clientId}/date-range`);
 
 export const getPageTypes = (clientId: number) =>
   fetchApi<PageTypeStats[]>(`/stats/${clientId}/page-types`);
@@ -350,6 +357,11 @@ export interface PageStats {
 export interface PageTypeStats {
   type: string;
   count: number;
+}
+
+export interface DateRange {
+  min_date: string | null;
+  max_date: string | null;
 }
 
 export interface PeriodComparison {

@@ -10,7 +10,7 @@ from app.services.bot_registry import classify_bot
 
 # --- Page type classification ---
 
-_PAGE_EXTENSIONS = {'.html', '.htm', '.php', '.asp', '.aspx', '.jsp', '.shtml'}
+_PAGE_EXTENSIONS = {'.html', '.htm', '.asp', '.aspx', '.jsp', '.shtml'}
 _JS_EXTENSIONS = {'.js', '.mjs', '.jsx', '.ts', '.tsx'}
 _CSS_EXTENSIONS = {'.css', '.scss', '.less'}
 _IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.ico', '.bmp', '.tiff', '.avif'}

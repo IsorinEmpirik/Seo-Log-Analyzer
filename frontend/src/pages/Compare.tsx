@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { ArrowRight, TrendingUp, TrendingDown, Minus } from 'lucide-react';
-import { comparePeriods, getBotFamilies, PeriodComparison, BotFamily, Client } from '@/lib/api';
+import { ArrowRight, TrendingUp, TrendingDown, Minus, Calendar } from 'lucide-react';
+import { comparePeriods, getDateRange, getBotFamilies, PeriodComparison, BotFamily, Client, DateRange } from '@/lib/api';
 import { formatNumber, getHttpCodeColor } from '@/lib/utils';
 import { BotFilter } from '@/components/BotFilter';
 
@@ -19,10 +19,17 @@ export function Compare({ client }: CompareProps) {
   const [botFamilies, setBotFamilies] = useState<BotFamily[]>([]);
   const [selectedFamily, setSelectedFamily] = useState<string | null>(null);
   const [selectedBot, setSelectedBot] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState<DateRange | null>(null);
 
   useEffect(() => {
     getBotFamilies().then(setBotFamilies).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (client) {
+      getDateRange(client.id).then(setDateRange).catch(() => {});
+    }
+  }, [client]);
 
   const handleCompare = async () => {
     if (!client || !periodAStart || !periodAEnd || !periodBStart || !periodBEnd) {
@@ -71,6 +78,16 @@ export function Compare({ client }: CompareProps) {
 
       {/* Period selection */}
       <div className="bg-surface rounded-xl border border-gray-200 p-6">
+        {/* Available date range info */}
+        {dateRange?.min_date && dateRange?.max_date && (
+          <div className="flex items-center gap-2 mb-6 px-4 py-3 bg-blue-50 border border-blue-100 rounded-lg">
+            <Calendar className="w-4 h-4 text-primary flex-shrink-0" />
+            <span className="text-sm text-text">
+              Données disponibles du <strong>{new Date(dateRange.min_date).toLocaleDateString('fr-FR')}</strong> au <strong>{new Date(dateRange.max_date).toLocaleDateString('fr-FR')}</strong>
+            </span>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           {/* Period A */}
           <div>
@@ -81,6 +98,8 @@ export function Compare({ client }: CompareProps) {
                 <input
                   type="date"
                   value={periodAStart}
+                  min={dateRange?.min_date || undefined}
+                  max={dateRange?.max_date || undefined}
                   onChange={(e) => setPeriodAStart(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
@@ -90,6 +109,8 @@ export function Compare({ client }: CompareProps) {
                 <input
                   type="date"
                   value={periodAEnd}
+                  min={dateRange?.min_date || undefined}
+                  max={dateRange?.max_date || undefined}
                   onChange={(e) => setPeriodAEnd(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
@@ -106,6 +127,8 @@ export function Compare({ client }: CompareProps) {
                 <input
                   type="date"
                   value={periodBStart}
+                  min={dateRange?.min_date || undefined}
+                  max={dateRange?.max_date || undefined}
                   onChange={(e) => setPeriodBStart(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
@@ -115,6 +138,8 @@ export function Compare({ client }: CompareProps) {
                 <input
                   type="date"
                   value={periodBEnd}
+                  min={dateRange?.min_date || undefined}
+                  max={dateRange?.max_date || undefined}
                   onChange={(e) => setPeriodBEnd(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
