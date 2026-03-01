@@ -23,21 +23,26 @@ def dashboard(
     end_date: Optional[date] = Query(None),
     bot_family: Optional[str] = Query(None),
     crawler: Optional[str] = Query(None),
+    page_type: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     """Get main dashboard statistics"""
-    return get_dashboard_stats(db, client_id, start_date, end_date, bot_family, crawler)
+    return get_dashboard_stats(db, client_id, start_date, end_date, bot_family, crawler, page_type)
 
 
-@router.get("/{client_id}/orphan-pages", response_model=List[OrphanPage])
+@router.get("/{client_id}/orphan-pages")
 def orphan_pages(
     client_id: int,
     bot_family: Optional[str] = Query(None),
     crawler: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    page_type: Optional[str] = Query(None),
+    limit: int = Query(100),
+    offset: int = Query(0),
     db: Session = Depends(get_db),
 ):
     """Get pages crawled by bots but not found in Screaming Frog"""
-    return get_orphan_pages(db, client_id, bot_family, crawler)
+    return get_orphan_pages(db, client_id, bot_family, crawler, search, page_type, limit, offset)
 
 
 @router.get("/{client_id}/compare")
@@ -67,10 +72,12 @@ def frequency(
     group_by: str = Query("day", regex="^(day|week)$"),
     bot_family: Optional[str] = Query(None),
     crawler: Optional[str] = Query(None),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
     db: Session = Depends(get_db)
 ):
     """Get crawl frequency for a page or all pages"""
-    return get_page_frequency(db, client_id, url, group_by, bot_family, crawler)
+    return get_page_frequency(db, client_id, url, group_by, bot_family, crawler, start_date, end_date)
 
 
 @router.get("/{client_id}/bot-distribution")
@@ -109,15 +116,54 @@ def bot_distribution(
     }
 
 
+@router.get("/{client_id}/page-types")
+def page_types(
+    client_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get available page types with counts for a client"""
+    results = (
+        db.query(Log.page_type, func.count(Log.id))
+        .filter(Log.client_id == client_id)
+        .filter(Log.page_type.isnot(None))
+        .group_by(Log.page_type)
+        .order_by(func.count(Log.id).desc())
+        .all()
+    )
+    return [{"type": t, "count": c} for t, c in results]
+
+
+@router.get("/{client_id}/date-range")
+def get_date_range(
+    client_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get the min and max log dates for a client"""
+    result = (
+        db.query(func.min(Log.log_date), func.max(Log.log_date))
+        .filter(Log.client_id == client_id)
+        .first()
+    )
+    if result and result[0] and result[1]:
+        return {
+            "min_date": result[0].isoformat(),
+            "max_date": result[1].isoformat(),
+        }
+    return {"min_date": None, "max_date": None}
+
+
 @router.get("/{client_id}/pages")
 def get_pages(
     client_id: int,
     http_code: Optional[int] = Query(None),
     search: Optional[str] = Query(None),
+    page_type: Optional[str] = Query(None),
     limit: int = Query(100),
     offset: int = Query(0),
     bot_family: Optional[str] = Query(None),
     crawler: Optional[str] = Query(None),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
     db: Session = Depends(get_db)
 ):
     """Get list of crawled pages with filters"""
@@ -127,6 +173,12 @@ def get_pages(
         base_query = base_query.filter(Log.bot_family == bot_family)
     if crawler:
         base_query = base_query.filter(Log.crawler == crawler)
+    if page_type:
+        base_query = base_query.filter(Log.page_type == page_type)
+    if start_date:
+        base_query = base_query.filter(Log.log_date >= start_date)
+    if end_date:
+        base_query = base_query.filter(Log.log_date <= end_date)
 
     date_range = (
         base_query

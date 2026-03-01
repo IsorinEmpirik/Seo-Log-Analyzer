@@ -26,6 +26,7 @@ def get_dashboard_stats(
     end_date: Optional[date] = None,
     bot_family: Optional[str] = None,
     crawler: Optional[str] = None,
+    page_type: Optional[str] = None,
 ) -> DashboardStats:
     """Get main dashboard statistics"""
 
@@ -37,6 +38,9 @@ def get_dashboard_stats(
         query = query.filter(Log.log_date <= end_date)
 
     query = _apply_bot_filters(query, bot_family, crawler)
+
+    if page_type:
+        query = query.filter(Log.page_type == page_type)
 
     # Total crawls
     total_crawls = query.count()
@@ -95,20 +99,22 @@ def get_dashboard_stats(
         for url, count in top_pages_raw
     ]
 
-    # Average crawl interval
+    # Average crawl interval (computed in SQL for performance)
     avg_crawl_interval = None
     if min_date and max_date and min_date != max_date and unique_pages and unique_pages > 0:
         total_days = (max_date - min_date).days
         if total_days > 0:
-            page_crawl_counts = (
+            subq = (
                 query
-                .with_entities(Log.url, func.count(Log.id).label('count'))
+                .with_entities(
+                    (total_days * 1.0 / func.count(Log.id)).label('interval')
+                )
                 .group_by(Log.url)
-                .all()
+                .subquery()
             )
-            intervals = [total_days / count for _, count in page_crawl_counts if count > 0]
-            if intervals:
-                avg_crawl_interval = round(sum(intervals) / len(intervals), 1)
+            result = db.query(func.avg(subq.c.interval)).scalar()
+            if result is not None:
+                avg_crawl_interval = round(float(result), 1)
 
     return DashboardStats(
         total_crawls=total_crawls,
@@ -126,16 +132,21 @@ def get_orphan_pages(
     client_id: int,
     bot_family: Optional[str] = None,
     crawler: Optional[str] = None,
-) -> List[OrphanPage]:
+    search: Optional[str] = None,
+    page_type: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict:
     """
     Find pages crawled by bots but not in Screaming Frog export.
     Only pages whose most recent crawl returned HTTP 200.
+    Returns paginated results with total count.
     """
-    from sqlalchemy import case
-    from sqlalchemy.sql import literal_column
-
     base_query = db.query(Log).filter(Log.client_id == client_id)
     base_query = _apply_bot_filters(base_query, bot_family, crawler)
+
+    if page_type:
+        base_query = base_query.filter(Log.page_type == page_type)
 
     # Subquery: for each URL, get the timestamp of the most recent crawl
     latest_ts_subq = (
@@ -182,13 +193,33 @@ def get_orphan_pages(
             continue
 
         if normalized_url not in sf_paths:
+            # Exclude noise: feeds, xml, query strings, wp-content
+            url_lower = url.lower()
+            if '/feed' in url_lower:
+                continue
+            if url_lower.split('?')[0].endswith('.xml'):
+                continue
+            if '?' in url:
+                continue
+            if 'wp-content' in url_lower:
+                continue
+
+            # Apply search filter
+            if search and search.lower() not in url_lower:
+                continue
             orphans.append(OrphanPage(
                 url=url,
                 crawl_count=count,
                 last_crawl=last_crawl
             ))
 
-    return sorted(orphans, key=lambda x: x.crawl_count, reverse=True)
+    orphans.sort(key=lambda x: x.crawl_count, reverse=True)
+    total = len(orphans)
+
+    return {
+        "total": total,
+        "orphans": orphans[offset:offset + limit]
+    }
 
 
 def compare_periods(
@@ -259,6 +290,8 @@ def get_page_frequency(
     group_by: str = "day",
     bot_family: Optional[str] = None,
     crawler: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
 ) -> List[dict]:
     """Get crawl frequency for a specific page or all pages"""
 
@@ -267,6 +300,10 @@ def get_page_frequency(
 
     if url:
         query = query.filter(Log.url == url)
+    if start_date:
+        query = query.filter(Log.log_date >= start_date)
+    if end_date:
+        query = query.filter(Log.log_date <= end_date)
 
     if group_by == "week":
         results = (

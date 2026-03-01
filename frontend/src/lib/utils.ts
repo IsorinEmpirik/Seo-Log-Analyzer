@@ -35,6 +35,22 @@ export function getHttpCodeColor(code: number): string {
   return '#64748B'; // Unknown - gray
 }
 
+export const PAGE_TYPE_LABELS: Record<string, string> = {
+  page: 'Pages HTML',
+  javascript: 'JavaScript',
+  css: 'CSS',
+  image: 'Images',
+  font: 'Polices',
+  xml: 'XML / Sitemap',
+  json: 'JSON',
+  pdf: 'PDF',
+  other: 'Autres',
+};
+
+export function getPageTypeLabel(type: string): string {
+  return PAGE_TYPE_LABELS[type] || type;
+}
+
 export function getHttpCodeLabel(code: number): string {
   const labels: Record<number, string> = {
     200: 'OK',

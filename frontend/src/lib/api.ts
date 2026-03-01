@@ -1,6 +1,45 @@
 const API_BASE = '/api';
 
+// --- Simple in-memory cache to avoid refetching on tab switches ---
+const _cache = new Map<string, { data: unknown; timestamp: number }>();
+const CACHE_TTL = 60_000; // 60 seconds
+
+function getCacheKey(endpoint: string): string {
+  return endpoint;
+}
+
+function getCached<T>(key: string): T | null {
+  const entry = _cache.get(key);
+  if (entry && Date.now() - entry.timestamp < CACHE_TTL) {
+    return entry.data as T;
+  }
+  _cache.delete(key);
+  return null;
+}
+
+function setCache(key: string, data: unknown): void {
+  _cache.set(key, { data, timestamp: Date.now() });
+}
+
+export function invalidateCache(prefix?: string): void {
+  if (prefix) {
+    for (const key of _cache.keys()) {
+      if (key.startsWith(prefix)) _cache.delete(key);
+    }
+  } else {
+    _cache.clear();
+  }
+}
+
+
 async function fetchApi<T>(endpoint: string, options?: RequestInit, retries = 3): Promise<T> {
+  // Use cache for GET requests only
+  const isGet = !options?.method || options.method === 'GET';
+  if (isGet) {
+    const cached = getCached<T>(getCacheKey(endpoint));
+    if (cached !== null) return cached;
+  }
+
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const response = await fetch(`${API_BASE}${endpoint}`, {
@@ -22,7 +61,9 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit, retries = 3)
         throw new Error(error.detail || 'An error occurred');
       }
 
-      return response.json();
+      const data = await response.json();
+      if (isGet) setCache(getCacheKey(endpoint), data);
+      return data;
     } catch (error) {
       // Retry on network errors (backend not started yet)
       if (attempt < retries && error instanceof TypeError) {
@@ -89,8 +130,10 @@ export const uploadScreamingFrog = async (clientId: number, file: File) => {
   return response.json();
 };
 
-export const deleteImport = (fileId: number) =>
-  fetchApi(`/imports/${fileId}`, { method: 'DELETE' });
+export const deleteImport = (fileId: number) => {
+  invalidateCache('/stats/');
+  return fetchApi(`/imports/${fileId}`, { method: 'DELETE' });
+};
 
 export const getBotFamilies = () =>
   fetchApi<BotFamily[]>('/imports/bots/families');
@@ -122,22 +165,35 @@ export const getDashboardStats = (
   endDate?: string,
   botFamily?: string,
   crawler?: string,
+  pageType?: string,
 ) => {
   const params = new URLSearchParams();
   if (startDate) params.append('start_date', startDate);
   if (endDate) params.append('end_date', endDate);
   if (botFamily) params.append('bot_family', botFamily);
   if (crawler) params.append('crawler', crawler);
+  if (pageType) params.append('page_type', pageType);
   const query = params.toString() ? `?${params}` : '';
   return fetchApi<DashboardStats>(`/stats/${clientId}/dashboard${query}`);
 };
 
-export const getOrphanPages = (clientId: number, botFamily?: string, crawler?: string) => {
+export const getOrphanPages = (clientId: number, options?: {
+  botFamily?: string;
+  crawler?: string;
+  search?: string;
+  pageType?: string;
+  limit?: number;
+  offset?: number;
+}) => {
   const params = new URLSearchParams();
-  if (botFamily) params.append('bot_family', botFamily);
-  if (crawler) params.append('crawler', crawler);
+  if (options?.botFamily) params.append('bot_family', options.botFamily);
+  if (options?.crawler) params.append('crawler', options.crawler);
+  if (options?.search) params.append('search', options.search);
+  if (options?.pageType) params.append('page_type', options.pageType);
+  if (options?.limit) params.append('limit', String(options.limit));
+  if (options?.offset) params.append('offset', String(options.offset));
   const query = params.toString() ? `?${params}` : '';
-  return fetchApi<OrphanPage[]>(`/stats/${clientId}/orphan-pages${query}`);
+  return fetchApi<{ total: number; orphans: OrphanPage[] }>(`/stats/${clientId}/orphan-pages${query}`);
 };
 
 export const getFrequency = (
@@ -146,31 +202,47 @@ export const getFrequency = (
   groupBy: 'day' | 'week' = 'day',
   botFamily?: string,
   crawler?: string,
+  startDate?: string,
+  endDate?: string,
 ) => {
   const params = new URLSearchParams({ group_by: groupBy });
   if (url) params.append('url', url);
   if (botFamily) params.append('bot_family', botFamily);
   if (crawler) params.append('crawler', crawler);
+  if (startDate) params.append('start_date', startDate);
+  if (endDate) params.append('end_date', endDate);
   return fetchApi<{ period: string; count: number }[]>(`/stats/${clientId}/frequency?${params}`);
 };
 
 export const getPages = (clientId: number, options?: {
   httpCode?: number;
   search?: string;
+  pageType?: string;
   limit?: number;
   offset?: number;
   botFamily?: string;
   crawler?: string;
+  startDate?: string;
+  endDate?: string;
 }) => {
   const params = new URLSearchParams();
   if (options?.httpCode) params.append('http_code', String(options.httpCode));
   if (options?.search) params.append('search', options.search);
+  if (options?.pageType) params.append('page_type', options.pageType);
   if (options?.limit) params.append('limit', String(options.limit));
   if (options?.offset) params.append('offset', String(options.offset));
   if (options?.botFamily) params.append('bot_family', options.botFamily);
   if (options?.crawler) params.append('crawler', options.crawler);
+  if (options?.startDate) params.append('start_date', options.startDate);
+  if (options?.endDate) params.append('end_date', options.endDate);
   return fetchApi<{ total: number; pages: PageStats[] }>(`/stats/${clientId}/pages?${params}`);
 };
+
+export const getDateRange = (clientId: number) =>
+  fetchApi<DateRange>(`/stats/${clientId}/date-range`);
+
+export const getPageTypes = (clientId: number) =>
+  fetchApi<PageTypeStats[]>(`/stats/${clientId}/page-types`);
 
 export const comparePeriods = (
   clientId: number,
@@ -284,6 +356,16 @@ export interface PageStats {
   last_crawl?: string;
   http_code?: number;
   crawl_interval?: number;
+}
+
+export interface PageTypeStats {
+  type: string;
+  count: number;
+}
+
+export interface DateRange {
+  min_date: string | null;
+  max_date: string | null;
 }
 
 export interface PeriodComparison {

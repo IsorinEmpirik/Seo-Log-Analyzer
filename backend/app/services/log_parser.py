@@ -1,10 +1,50 @@
 import re
 import csv
+import os
 import pandas as pd
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Generator, Tuple
 from io import BytesIO
 from app.services.bot_registry import classify_bot
+
+
+# --- Page type classification ---
+
+_PAGE_EXTENSIONS = {'.html', '.htm', '.asp', '.aspx', '.jsp', '.shtml'}
+_JS_EXTENSIONS = {'.js', '.mjs', '.jsx', '.ts', '.tsx'}
+_CSS_EXTENSIONS = {'.css', '.scss', '.less'}
+_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.ico', '.bmp', '.tiff', '.avif'}
+_FONT_EXTENSIONS = {'.woff', '.woff2', '.ttf', '.eot', '.otf'}
+_XML_EXTENSIONS = {'.xml', '.rss', '.atom', '.xsl'}
+
+
+def classify_page_type(url: str) -> str:
+    """
+    Classify a URL into a page type based on its extension.
+    Returns: 'page', 'javascript', 'css', 'image', 'font', 'xml', 'other'
+    """
+    # Remove query string and fragment
+    clean = url.split('?')[0].split('#')[0]
+    # Get extension
+    _, ext = os.path.splitext(clean.lower())
+
+    if not ext or ext in _PAGE_EXTENSIONS:
+        return 'page'
+    if ext in _JS_EXTENSIONS:
+        return 'javascript'
+    if ext in _CSS_EXTENSIONS:
+        return 'css'
+    if ext in _IMAGE_EXTENSIONS:
+        return 'image'
+    if ext in _FONT_EXTENSIONS:
+        return 'font'
+    if ext in _XML_EXTENSIONS:
+        return 'xml'
+    if ext == '.json':
+        return 'json'
+    if ext == '.pdf':
+        return 'pdf'
+    return 'other'
 
 
 # Pre-compiled Apache Combined Log regex
@@ -55,6 +95,7 @@ def parse_log_line_v2(line: str) -> Optional[Dict[str, Any]]:
         "bot_family": bot_family,
         "response_time": int(response_time) if response_time else None,
         "log_date": timestamp.date(),
+        "page_type": classify_page_type(url),
     }
 
 
@@ -246,6 +287,7 @@ def parse_csv_log_line(row: dict, col_map: dict) -> Optional[Dict[str, Any]]:
         "bot_family": bot_family,
         "response_time": None,
         "log_date": timestamp.date(),
+        "page_type": classify_page_type(url),
     }
 
 
@@ -313,6 +355,7 @@ def parse_log_line(line: str) -> Optional[Dict[str, Any]]:
         "bot_family": bot_family,
         "response_time": int(response_time) if response_time else None,
         "log_date": timestamp.date() if timestamp else None,
+        "page_type": classify_page_type(url),
     }
 
 

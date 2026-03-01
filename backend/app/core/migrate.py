@@ -6,6 +6,7 @@ Safe to run multiple times (idempotent).
 from sqlalchemy import text
 from app.core.database import engine
 from app.services.bot_registry import classify_bot
+from app.services.log_parser import classify_page_type
 
 
 def run_migrations():
@@ -13,6 +14,7 @@ def run_migrations():
     with engine.connect() as conn:
         _add_columns(conn)
         _reclassify_existing_logs(conn)
+        _backfill_page_type(conn)
         _create_indexes(conn)
         print("[MIGRATE] Migrations completed")
 
@@ -30,6 +32,14 @@ def _add_columns(conn):
             print(f"[MIGRATE] Added logs.{col}")
         except Exception:
             conn.rollback()
+
+    # Log table: page_type column
+    try:
+        conn.execute(text("ALTER TABLE logs ADD COLUMN page_type VARCHAR(20)"))
+        conn.commit()
+        print("[MIGRATE] Added logs.page_type")
+    except Exception:
+        conn.rollback()
 
     # ImportFile table new columns
     for col, col_type, default in [
@@ -93,6 +103,44 @@ def _update_batch(conn, batch):
         ), item)
 
 
+def _backfill_page_type(conn):
+    """Backfill page_type for existing logs that don't have it."""
+    result = conn.execute(text(
+        "SELECT COUNT(*) FROM logs WHERE page_type IS NULL"
+    ))
+    count = result.scalar()
+    if count == 0:
+        return
+
+    print(f"[MIGRATE] Backfilling page_type for {count} logs...")
+
+    rows = conn.execute(text(
+        "SELECT id, url FROM logs WHERE page_type IS NULL"
+    ))
+    batch = []
+    for row in rows:
+        log_id, url = row[0], row[1]
+        pt = classify_page_type(url or "")
+        batch.append({"id": log_id, "pt": pt})
+
+        if len(batch) >= 5000:
+            for item in batch:
+                conn.execute(text(
+                    "UPDATE logs SET page_type = :pt WHERE id = :id"
+                ), item)
+            conn.commit()
+            batch = []
+
+    if batch:
+        for item in batch:
+            conn.execute(text(
+                "UPDATE logs SET page_type = :pt WHERE id = :id"
+            ), item)
+        conn.commit()
+
+    print(f"[MIGRATE] Backfilled page_type for {count} logs")
+
+
 def _create_indexes(conn):
     """Create composite indexes for performance."""
     indexes = [
@@ -100,6 +148,10 @@ def _create_indexes(conn):
         "CREATE INDEX IF NOT EXISTS ix_logs_client_family ON logs(client_id, bot_family)",
         "CREATE INDEX IF NOT EXISTS ix_logs_client_crawler ON logs(client_id, crawler)",
         "CREATE INDEX IF NOT EXISTS ix_logs_client_date_family ON logs(client_id, log_date, bot_family)",
+        "CREATE INDEX IF NOT EXISTS ix_logs_client_date ON logs(client_id, log_date)",
+        "CREATE INDEX IF NOT EXISTS ix_logs_client_url ON logs(client_id, url)",
+        "CREATE INDEX IF NOT EXISTS ix_logs_client_http_code ON logs(client_id, http_code)",
+        "CREATE INDEX IF NOT EXISTS ix_logs_client_page_type ON logs(client_id, page_type)",
     ]
     for idx_sql in indexes:
         try:

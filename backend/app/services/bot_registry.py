@@ -139,14 +139,6 @@ BOT_FAMILIES = {
             "Amazonbot": ["amazonbot"],
         }
     },
-    "Cohere": {
-        "type": "llm",
-        "color": "#39594D",
-        "bots": {
-            "Cohere-Training": ["cohere-training-data-crawler"],
-            "CohereBot": ["cohere-ai"],
-        }
-    },
     "Mistral": {
         "type": "llm",
         "color": "#F54E42",
@@ -177,25 +169,11 @@ BOT_FAMILIES = {
             "CCBot": ["ccbot"],
         }
     },
-    "You.com": {
-        "type": "llm",
-        "color": "#6366F1",
-        "bots": {
-            "YouBot": ["youbot"],
-        }
-    },
     "Brave": {
         "type": "llm",
         "color": "#FB542B",
         "bots": {
             "BraveBot": ["bravebot"],
-        }
-    },
-    "Diffbot": {
-        "type": "llm",
-        "color": "#1C7C54",
-        "bots": {
-            "Diffbot": ["diffbot"],
         }
     },
 }
