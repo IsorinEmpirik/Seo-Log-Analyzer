@@ -23,28 +23,41 @@ FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 
 def find_process_by_port(port):
     """Find process using a specific port"""
-    for proc in psutil.process_iter(['pid', 'name']):
-        try:
-            for conn in proc.connections():
-                if conn.laddr.port == port:
-                    return proc
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
+    try:
+        for conn in psutil.net_connections(kind='inet'):
+            if conn.laddr.port == port and conn.pid and conn.pid != 0:
+                try:
+                    return psutil.Process(conn.pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+    except (psutil.AccessDenied, PermissionError):
+        pass
     return None
 
 
 def kill_process_tree(proc):
     """Kill a process and all its children"""
     try:
+        if proc.pid == 0:
+            return
         parent = psutil.Process(proc.pid)
         children = parent.children(recursive=True)
         for child in children:
-            child.terminate()
-        parent.terminate()
+            try:
+                child.terminate()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        try:
+            parent.terminate()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
         gone, alive = psutil.wait_procs(children + [parent], timeout=5)
         for p in alive:
-            p.kill()
-    except psutil.NoSuchProcess:
+            try:
+                p.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
         pass
 
 
