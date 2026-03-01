@@ -42,12 +42,13 @@ function UrlCrawlChart({ clientId, url, botFamily, crawler, startDate, endDate }
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const chartRef = useRef<Chart | null>(null);
   const [loading, setLoading] = useState(true);
-  const [empty, setEmpty] = useState(false);
+  const [chartData, setChartData] = useState<{ period: string; count: number }[]>([]);
 
+  // Step 1: fetch data
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    setEmpty(false);
+    setChartData([]);
 
     getFrequency(
       clientId,
@@ -59,78 +60,81 @@ function UrlCrawlChart({ clientId, url, botFamily, crawler, startDate, endDate }
       endDate || undefined,
     )
       .then((data) => {
-        if (cancelled) return;
-        setLoading(false);
-
-        if (!data || data.length === 0) {
-          setEmpty(true);
-          return;
+        if (!cancelled) {
+          setChartData(data ?? []);
+          setLoading(false);
         }
-
-        if (!canvasRef.current) return;
-
-        if (chartRef.current) {
-          chartRef.current.destroy();
-        }
-
-        chartRef.current = new Chart(canvasRef.current, {
-          type: 'line',
-          data: {
-            labels: data.map((d) => formatDate(d.period)),
-            datasets: [
-              {
-                label: 'Crawls',
-                data: data.map((d) => d.count),
-                borderColor: '#2563EB',
-                backgroundColor: 'rgba(37, 99, 235, 0.08)',
-                fill: true,
-                tension: 0.3,
-                pointRadius: data.length > 30 ? 0 : 3,
-                pointHoverRadius: 5,
-                borderWidth: 2,
-              },
-            ],
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: { display: false },
-              tooltip: {
-                callbacks: {
-                  title: (items) => items[0]?.label ?? '',
-                  label: (item) => ` ${item.parsed.y} crawl${item.parsed.y > 1 ? 's' : ''}`,
-                },
-              },
-            },
-            scales: {
-              x: {
-                grid: { display: false },
-                ticks: {
-                  maxRotation: 0,
-                  maxTicksLimit: 10,
-                  font: { size: 11 },
-                },
-              },
-              y: {
-                beginAtZero: true,
-                grid: { color: '#f1f5f9' },
-                ticks: { font: { size: 11 }, precision: 0 },
-              },
-            },
-          },
-        });
       })
       .catch(() => {
-        if (!cancelled) { setLoading(false); setEmpty(true); }
+        if (!cancelled) {
+          setChartData([]);
+          setLoading(false);
+        }
       });
 
+    return () => { cancelled = true; };
+  }, [clientId, url, botFamily, crawler, startDate, endDate]);
+
+  // Step 2: draw chart once canvas is in the DOM (after loading → false)
+  useEffect(() => {
+    if (loading || chartData.length === 0) {
+      chartRef.current?.destroy();
+      chartRef.current = null;
+      return;
+    }
+    if (!canvasRef.current) return;
+
+    chartRef.current?.destroy();
+
+    chartRef.current = new Chart(canvasRef.current, {
+      type: 'line',
+      data: {
+        labels: chartData.map((d) => formatDate(d.period)),
+        datasets: [
+          {
+            label: 'Crawls',
+            data: chartData.map((d) => d.count),
+            borderColor: '#2563EB',
+            backgroundColor: 'rgba(37, 99, 235, 0.08)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: chartData.length > 30 ? 0 : 3,
+            pointHoverRadius: 5,
+            borderWidth: 2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: (items) => items[0]?.label ?? '',
+              label: (item) => ` ${item.parsed.y} crawl${item.parsed.y > 1 ? 's' : ''}`,
+            },
+          },
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { maxRotation: 0, maxTicksLimit: 10, font: { size: 11 } },
+          },
+          y: {
+            beginAtZero: true,
+            grid: { color: '#f1f5f9' },
+            ticks: { font: { size: 11 }, precision: 0 },
+          },
+        },
+      },
+    });
+
     return () => {
-      cancelled = true;
       chartRef.current?.destroy();
       chartRef.current = null;
     };
-  }, [clientId, url, botFamily, crawler, startDate, endDate]);
+  }, [loading, chartData]);
 
   if (loading) {
     return (
@@ -139,7 +143,7 @@ function UrlCrawlChart({ clientId, url, botFamily, crawler, startDate, endDate }
       </div>
     );
   }
-  if (empty) {
+  if (chartData.length === 0) {
     return (
       <div className="h-40 flex items-center justify-center text-text-muted text-sm">
         Aucune donnée sur cette période
@@ -379,7 +383,7 @@ export function Pages({ client }: PagesProps) {
                   <th className="px-4 py-3 font-medium text-right">Crawls</th>
                   <th className="px-4 py-3 font-medium text-right">Crawlée tous les</th>
                   <th className="px-4 py-3 font-medium">Dernier crawl</th>
-                  <th className="px-4 py-3 font-medium text-center w-10">Évol.</th>
+                  <th className="pl-4 pr-6 py-3 font-medium text-center w-16">Évol.</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -432,10 +436,10 @@ export function Pages({ client }: PagesProps) {
                         <td className="px-4 py-3 text-text-muted">
                           {page.last_crawl ? formatDateTime(page.last_crawl) : '-'}
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        <td className="pl-4 pr-6 py-3 text-center">
                           <button
                             onClick={() => toggleExpand(page.url)}
-                            title={isExpanded ? 'Masquer le graphique' : 'Voir l\'évolution des crawls'}
+                            title={isExpanded ? 'Masquer le graphique' : "Voir l'évolution des crawls"}
                             className={`p-1.5 rounded-lg transition-all ${
                               isExpanded
                                 ? 'bg-primary text-white shadow-sm'

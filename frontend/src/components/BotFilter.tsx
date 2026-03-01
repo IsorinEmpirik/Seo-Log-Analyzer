@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { X, ChevronDown } from 'lucide-react';
 import { BotFamily } from '@/lib/api';
-import { BotLogo, BOT_FAMILY_COLOR } from './BotLogos';
+import { BotLogo, BOT_FAMILY_COLOR, getBotDisplayName } from './BotLogos';
 
 interface BotFilterProps {
   families: BotFamily[];
@@ -59,7 +59,7 @@ export function BotFilter({
             <>
               <BotLogo family={selectedFamily} size={16} />
               <span className="font-medium" style={{ color }}>
-                {selectedFamily}
+                {selectedBot ?? getBotDisplayName(selectedFamily)}
               </span>
             </>
           ) : (
@@ -179,7 +179,7 @@ function FamilyLogoButton({ family, selected, onClick }: FamilyLogoButtonProps) 
       style={selected ? { backgroundColor: color, borderColor: color } : undefined}
     >
       <BotLogo family={family} size={14} />
-      <span>{family}</span>
+      <span>{getBotDisplayName(family)}</span>
     </button>
   );
 }

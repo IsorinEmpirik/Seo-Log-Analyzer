@@ -84,4 +84,31 @@ export function BotLogo({ family, size = 20, className = '' }: BotLogoProps) {
   );
 }
 
+// Primary crawler name to display instead of company/family name
+const BOT_FAMILY_DISPLAY_NAME: Record<string, string> = {
+  Google: 'Googlebot',
+  Microsoft: 'Bingbot',
+  Yandex: 'YandexBot',
+  Baidu: 'Baiduspider',
+  DuckDuckGo: 'DuckDuckBot',
+  Apple: 'Applebot',
+  Yahoo: 'Slurp',
+  OpenAI: 'GPTBot',
+  Anthropic: 'ClaudeBot',
+  'Google AI': 'GoogleOther',
+  'Meta AI': 'Meta-WebIndexer',
+  Perplexity: 'PerplexityBot',
+  Bytedance: 'Bytespider',
+  Amazon: 'Amazonbot',
+  Mistral: 'MistralAI-User',
+  DeepSeek: 'DeepSeekBot',
+  xAI: 'GrokBot',
+  CommonCrawl: 'CCBot',
+  Brave: 'BraveBot',
+};
+
+export function getBotDisplayName(family: string): string {
+  return BOT_FAMILY_DISPLAY_NAME[family] ?? family;
+}
+
 export { BOT_FAMILY_COLOR };
