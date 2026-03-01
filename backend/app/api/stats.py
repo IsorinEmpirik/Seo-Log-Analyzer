@@ -72,10 +72,12 @@ def frequency(
     group_by: str = Query("day", regex="^(day|week)$"),
     bot_family: Optional[str] = Query(None),
     crawler: Optional[str] = Query(None),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
     db: Session = Depends(get_db)
 ):
     """Get crawl frequency for a page or all pages"""
-    return get_page_frequency(db, client_id, url, group_by, bot_family, crawler)
+    return get_page_frequency(db, client_id, url, group_by, bot_family, crawler, start_date, end_date)
 
 
 @router.get("/{client_id}/bot-distribution")

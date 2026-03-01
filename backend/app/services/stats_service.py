@@ -290,6 +290,8 @@ def get_page_frequency(
     group_by: str = "day",
     bot_family: Optional[str] = None,
     crawler: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
 ) -> List[dict]:
     """Get crawl frequency for a specific page or all pages"""
 
@@ -298,6 +300,10 @@ def get_page_frequency(
 
     if url:
         query = query.filter(Log.url == url)
+    if start_date:
+        query = query.filter(Log.log_date >= start_date)
+    if end_date:
+        query = query.filter(Log.log_date <= end_date)
 
     if group_by == "week":
         results = (

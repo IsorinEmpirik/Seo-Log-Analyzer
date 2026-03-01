@@ -202,11 +202,15 @@ export const getFrequency = (
   groupBy: 'day' | 'week' = 'day',
   botFamily?: string,
   crawler?: string,
+  startDate?: string,
+  endDate?: string,
 ) => {
   const params = new URLSearchParams({ group_by: groupBy });
   if (url) params.append('url', url);
   if (botFamily) params.append('bot_family', botFamily);
   if (crawler) params.append('crawler', crawler);
+  if (startDate) params.append('start_date', startDate);
+  if (endDate) params.append('end_date', endDate);
   return fetchApi<{ period: string; count: number }[]>(`/stats/${clientId}/frequency?${params}`);
 };
 

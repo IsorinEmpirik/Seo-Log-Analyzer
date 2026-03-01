@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
-import { Search, ChevronLeft, ChevronRight, ExternalLink, Calendar } from 'lucide-react';
-import { getPages, getDateRange, getBotFamilies, PageStats, BotFamily, Client, DateRange } from '@/lib/api';
-import { formatNumber, formatDateTime, getHttpCodeColor } from '@/lib/utils';
+import { useState, useEffect, useRef } from 'react';
+import { Search, ChevronLeft, ChevronRight, ExternalLink, Calendar, TrendingUp } from 'lucide-react';
+import { getPages, getDateRange, getBotFamilies, getFrequency, PageStats, BotFamily, Client, DateRange } from '@/lib/api';
+import { formatNumber, formatDateTime, getHttpCodeColor, formatDate } from '@/lib/utils';
 import { BotFilter } from '@/components/BotFilter';
 import { PageTypeFilter } from '@/components/PageTypeFilter';
 import { useDebounce } from '@/hooks/useDebounce';
+import Chart from 'chart.js/auto';
 
 interface PagesProps {
   client: Client | null;
@@ -21,12 +22,135 @@ const HTTP_CODE_FILTERS = [
 
 function buildFullUrl(path: string, domain?: string): string {
   if (!domain) return path;
-  // Already a full URL
   if (path.startsWith('http://') || path.startsWith('https://')) return path;
-  // Relative path - prepend domain
   const cleanDomain = domain.replace(/\/+$/, '');
   const prefix = cleanDomain.startsWith('http') ? cleanDomain : `https://${cleanDomain}`;
   return `${prefix}${path}`;
+}
+
+// --- Mini inline line chart rendered via Chart.js ---
+interface UrlChartProps {
+  clientId: number;
+  url: string;
+  botFamily?: string | null;
+  crawler?: string | null;
+  startDate?: string;
+  endDate?: string;
+}
+
+function UrlCrawlChart({ clientId, url, botFamily, crawler, startDate, endDate }: UrlChartProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const chartRef = useRef<Chart | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [empty, setEmpty] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setEmpty(false);
+
+    getFrequency(
+      clientId,
+      url,
+      'day',
+      botFamily ?? undefined,
+      crawler ?? undefined,
+      startDate || undefined,
+      endDate || undefined,
+    )
+      .then((data) => {
+        if (cancelled) return;
+        setLoading(false);
+
+        if (!data || data.length === 0) {
+          setEmpty(true);
+          return;
+        }
+
+        if (!canvasRef.current) return;
+
+        if (chartRef.current) {
+          chartRef.current.destroy();
+        }
+
+        chartRef.current = new Chart(canvasRef.current, {
+          type: 'line',
+          data: {
+            labels: data.map((d) => formatDate(d.period)),
+            datasets: [
+              {
+                label: 'Crawls',
+                data: data.map((d) => d.count),
+                borderColor: '#2563EB',
+                backgroundColor: 'rgba(37, 99, 235, 0.08)',
+                fill: true,
+                tension: 0.3,
+                pointRadius: data.length > 30 ? 0 : 3,
+                pointHoverRadius: 5,
+                borderWidth: 2,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  title: (items) => items[0]?.label ?? '',
+                  label: (item) => ` ${item.parsed.y} crawl${item.parsed.y > 1 ? 's' : ''}`,
+                },
+              },
+            },
+            scales: {
+              x: {
+                grid: { display: false },
+                ticks: {
+                  maxRotation: 0,
+                  maxTicksLimit: 10,
+                  font: { size: 11 },
+                },
+              },
+              y: {
+                beginAtZero: true,
+                grid: { color: '#f1f5f9' },
+                ticks: { font: { size: 11 }, precision: 0 },
+              },
+            },
+          },
+        });
+      })
+      .catch(() => {
+        if (!cancelled) { setLoading(false); setEmpty(true); }
+      });
+
+    return () => {
+      cancelled = true;
+      chartRef.current?.destroy();
+      chartRef.current = null;
+    };
+  }, [clientId, url, botFamily, crawler, startDate, endDate]);
+
+  if (loading) {
+    return (
+      <div className="h-40 flex items-center justify-center text-text-muted text-sm">
+        Chargement...
+      </div>
+    );
+  }
+  if (empty) {
+    return (
+      <div className="h-40 flex items-center justify-center text-text-muted text-sm">
+        Aucune donnée sur cette période
+      </div>
+    );
+  }
+  return (
+    <div className="relative h-40 w-full">
+      <canvas ref={canvasRef} />
+    </div>
+  );
 }
 
 export function Pages({ client }: PagesProps) {
@@ -43,6 +167,7 @@ export function Pages({ client }: PagesProps) {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [dateRange, setDateRange] = useState<DateRange | null>(null);
+  const [expandedUrl, setExpandedUrl] = useState<string | null>(null);
   const limit = 50;
 
   const debouncedSearch = useDebounce(search, 400);
@@ -51,7 +176,6 @@ export function Pages({ client }: PagesProps) {
     getBotFamilies().then(setBotFamilies).catch(() => {});
   }, []);
 
-  // Load date range when client changes
   useEffect(() => {
     if (client) {
       getDateRange(client.id).then(setDateRange).catch(() => {});
@@ -63,6 +187,7 @@ export function Pages({ client }: PagesProps) {
   useEffect(() => {
     if (client) {
       setOffset(0);
+      setExpandedUrl(null);
       loadPages();
     }
   }, [client, debouncedSearch, httpCode, pageType, selectedFamily, selectedBot, startDate, endDate]);
@@ -106,6 +231,10 @@ export function Pages({ client }: PagesProps) {
         Sélectionnez un client pour voir les pages crawlées
       </div>
     );
+  }
+
+  function toggleExpand(url: string) {
+    setExpandedUrl((prev) => (prev === url ? null : url));
   }
 
   return (
@@ -250,54 +379,103 @@ export function Pages({ client }: PagesProps) {
                   <th className="px-4 py-3 font-medium text-right">Crawls</th>
                   <th className="px-4 py-3 font-medium text-right">Crawlée tous les</th>
                   <th className="px-4 py-3 font-medium">Dernier crawl</th>
+                  <th className="px-4 py-3 font-medium text-center w-10">Évol.</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {pages.map((page) => {
                   const fullUrl = buildFullUrl(page.url, client.domain);
+                  const isExpanded = expandedUrl === page.url;
                   return (
-                    <tr key={page.url} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2 max-w-lg">
-                          <span className="text-text truncate" title={fullUrl}>
-                            {fullUrl}
-                          </span>
-                          <a
-                            href={fullUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex-shrink-0 text-text-muted hover:text-primary transition-colors"
-                            title="Ouvrir dans un nouvel onglet"
+                    <>
+                      <tr
+                        key={page.url}
+                        className={`hover:bg-gray-50 ${isExpanded ? 'bg-blue-50/40' : ''}`}
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2 max-w-lg">
+                            <span className="text-text truncate" title={fullUrl}>
+                              {fullUrl}
+                            </span>
+                            <a
+                              href={fullUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex-shrink-0 text-text-muted hover:text-primary transition-colors"
+                              title="Ouvrir dans un nouvel onglet"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {page.http_code && (
+                            <span
+                              className="inline-block px-2 py-1 rounded text-xs font-medium"
+                              style={{
+                                backgroundColor: `${getHttpCodeColor(page.http_code)}20`,
+                                color: getHttpCodeColor(page.http_code),
+                              }}
+                            >
+                              {page.http_code}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right font-medium">
+                          {formatNumber(page.crawl_count)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-text-muted">
+                          {page.crawl_interval != null
+                            ? `${page.crawl_interval} j`
+                            : '-'}
+                        </td>
+                        <td className="px-4 py-3 text-text-muted">
+                          {page.last_crawl ? formatDateTime(page.last_crawl) : '-'}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={() => toggleExpand(page.url)}
+                            title={isExpanded ? 'Masquer le graphique' : 'Voir l\'évolution des crawls'}
+                            className={`p-1.5 rounded-lg transition-all ${
+                              isExpanded
+                                ? 'bg-primary text-white shadow-sm'
+                                : 'text-gray-400 hover:text-primary hover:bg-blue-50'
+                            }`}
                           >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {page.http_code && (
-                          <span
-                            className="inline-block px-2 py-1 rounded text-xs font-medium"
-                            style={{
-                              backgroundColor: `${getHttpCodeColor(page.http_code)}20`,
-                              color: getHttpCodeColor(page.http_code),
-                            }}
-                          >
-                            {page.http_code}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium">
-                        {formatNumber(page.crawl_count)}
-                      </td>
-                      <td className="px-4 py-3 text-right text-text-muted">
-                        {page.crawl_interval != null
-                          ? `${page.crawl_interval} j`
-                          : '-'}
-                      </td>
-                      <td className="px-4 py-3 text-text-muted">
-                        {page.last_crawl ? formatDateTime(page.last_crawl) : '-'}
-                      </td>
-                    </tr>
+                            <TrendingUp className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+
+                      {/* Accordion chart row */}
+                      {isExpanded && (
+                        <tr key={`${page.url}-chart`} className="bg-blue-50/30">
+                          <td colSpan={6} className="px-6 py-4">
+                            <div className="flex items-center gap-2 mb-3">
+                              <TrendingUp className="w-4 h-4 text-primary" />
+                              <span className="text-sm font-medium text-text">
+                                Évolution des crawls par jour
+                              </span>
+                              {(startDate || endDate) && (
+                                <span className="text-xs text-text-muted">
+                                  · {startDate && new Date(startDate).toLocaleDateString('fr-FR')}
+                                  {startDate && endDate && ' → '}
+                                  {endDate && new Date(endDate).toLocaleDateString('fr-FR')}
+                                </span>
+                              )}
+                            </div>
+                            <UrlCrawlChart
+                              clientId={client.id}
+                              url={page.url}
+                              botFamily={selectedFamily}
+                              crawler={selectedBot}
+                              startDate={startDate || undefined}
+                              endDate={endDate || undefined}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   );
                 })}
               </tbody>
