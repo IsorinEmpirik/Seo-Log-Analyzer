@@ -6,6 +6,7 @@ import { Dashboard } from '@/pages/Dashboard';
 import { Pages } from '@/pages/Pages';
 import { OrphanPages } from '@/pages/OrphanPages';
 import { Compare } from '@/pages/Compare';
+import { BotComparison } from '@/pages/BotComparison';
 import { Import } from '@/pages/Import';
 import { Client } from '@/lib/api';
 
@@ -39,6 +40,7 @@ export default function App() {
             <Route path="/pages" element={<Pages client={selectedClient} />} />
             <Route path="/orphans" element={<OrphanPages client={selectedClient} />} />
             <Route path="/compare" element={<Compare client={selectedClient} />} />
+            <Route path="/bot-compare" element={<BotComparison client={selectedClient} />} />
             <Route path="/import" element={<Import client={selectedClient} />} />
           </Routes>
         </div>

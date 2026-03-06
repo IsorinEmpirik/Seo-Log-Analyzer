@@ -97,27 +97,45 @@ export function HttpCodeChart({ data }: HttpCodeChartProps) {
     }
 
     chartInstance.current = new Chart(chartRef.current, {
-      type: 'doughnut',
+      type: 'bar',
       data: {
-        labels: data.map((d) => `${d.code}`),
+        labels: data.map((d) => String(d.code)),
         datasets: [
           {
             data: data.map((d) => d.count),
             backgroundColor: data.map((d) => getHttpCodeColor(d.code)),
+            borderRadius: 4,
             borderWidth: 0,
           },
         ],
       },
       options: {
+        indexAxis: 'y',
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: {
-            position: 'right',
-            labels: {
-              usePointStyle: true,
-              padding: 15,
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (item) => {
+                const d = data[item.dataIndex];
+                return ` ${item.parsed.x.toLocaleString('fr-FR')} req. (${d.percentage}%)`;
+              },
             },
+          },
+        },
+        scales: {
+          x: {
+            beginAtZero: true,
+            grid: { color: '#f1f5f9' },
+            ticks: {
+              font: { size: 11 },
+              callback: (val) => Number(val) >= 1000 ? `${(Number(val) / 1000).toFixed(0)}k` : val,
+            },
+          },
+          y: {
+            grid: { display: false },
+            ticks: { font: { size: 13, weight: 'bold' as const } },
           },
         },
       },
@@ -130,14 +148,14 @@ export function HttpCodeChart({ data }: HttpCodeChartProps) {
 
   if (data.length === 0) {
     return (
-      <div className="h-64 flex items-center justify-center text-text-muted">
+      <div className="h-48 flex items-center justify-center text-text-muted">
         Aucune donnée disponible
       </div>
     );
   }
 
   return (
-    <div className="relative h-64 w-full">
+    <div className="relative w-full" style={{ height: `${Math.max(180, data.length * 52)}px` }}>
       <canvas ref={chartRef} />
     </div>
   );

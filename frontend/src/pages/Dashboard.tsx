@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BarChart3, FileText, AlertTriangle, TrendingUp, Clock } from 'lucide-react';
+import { BarChart3, FileText, AlertTriangle, TrendingUp, Clock, RefreshCw } from 'lucide-react';
 import { getDashboardStats, getBotFamilies, DashboardStats, BotFamily, Client } from '@/lib/api';
 import { StatCard } from '@/components/StatCard';
 import { BotFilter } from '@/components/BotFilter';
@@ -11,6 +11,14 @@ interface DashboardProps {
   client: Client | null;
 }
 
+function Spinner() {
+  return (
+    <div className="flex items-center justify-center py-16">
+      <div className="animate-spin rounded-full h-10 w-10 border-2 border-gray-200 border-t-primary" />
+    </div>
+  );
+}
+
 export function Dashboard({ client }: DashboardProps) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -20,16 +28,19 @@ export function Dashboard({ client }: DashboardProps) {
   const [selectedFamily, setSelectedFamily] = useState<string | null>(null);
   const [selectedBot, setSelectedBot] = useState<string | null>(null);
   const [pageType, setPageType] = useState<string | undefined>(undefined);
+  const [hasUnapplied, setHasUnapplied] = useState(false);
 
   useEffect(() => {
     getBotFamilies().then(setBotFamilies).catch(() => {});
   }, []);
 
+  // Auto-load only on client change
   useEffect(() => {
     if (client) {
       loadStats();
+      setHasUnapplied(false);
     }
-  }, [client, startDate, endDate, selectedFamily, selectedBot, pageType]);
+  }, [client]);
 
   const loadStats = async () => {
     if (!client) return;
@@ -51,6 +62,13 @@ export function Dashboard({ client }: DashboardProps) {
     }
   };
 
+  const handleValidate = () => {
+    setHasUnapplied(false);
+    loadStats();
+  };
+
+  const markUnapplied = () => setHasUnapplied(true);
+
   if (!client) {
     return (
       <div className="text-center py-12 text-text-muted">
@@ -60,9 +78,7 @@ export function Dashboard({ client }: DashboardProps) {
   }
 
   if (loading && !stats) {
-    return (
-      <div className="text-center py-12 text-text-muted">Chargement...</div>
-    );
+    return <Spinner />;
   }
 
   if (!stats) {
@@ -84,20 +100,20 @@ export function Dashboard({ client }: DashboardProps) {
           families={botFamilies}
           selectedFamily={selectedFamily}
           selectedBot={selectedBot}
-          onFamilyChange={setSelectedFamily}
-          onBotChange={setSelectedBot}
+          onFamilyChange={(v) => { setSelectedFamily(v); markUnapplied(); }}
+          onBotChange={(v) => { setSelectedBot(v); markUnapplied(); }}
         />
         <PageTypeFilter
           client={client}
           value={pageType}
-          onChange={setPageType}
+          onChange={(v) => { setPageType(v); markUnapplied(); }}
         />
         <div className="flex items-center gap-2">
           <label className="text-sm text-text-muted">Du:</label>
           <input
             type="date"
             value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
+            onChange={(e) => { setStartDate(e.target.value); markUnapplied(); }}
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
@@ -106,26 +122,42 @@ export function Dashboard({ client }: DashboardProps) {
           <input
             type="date"
             value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
+            onChange={(e) => { setEndDate(e.target.value); markUnapplied(); }}
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
         {(startDate || endDate) && (
           <button
-            onClick={() => {
-              setStartDate('');
-              setEndDate('');
-            }}
+            onClick={() => { setStartDate(''); setEndDate(''); markUnapplied(); }}
             className="text-sm text-primary hover:underline"
           >
             Reset dates
           </button>
         )}
-        {stats.date_range.start && (
-          <span className="text-sm text-text-muted ml-auto">
-            Donnees: {formatDate(stats.date_range.start)} - {formatDate(stats.date_range.end!)}
-          </span>
-        )}
+
+        {/* Appliquer button + spinner */}
+        <div className="flex items-center gap-2 ml-auto">
+          {stats.date_range.start && (
+            <span className="text-sm text-text-muted">
+              Données: {formatDate(stats.date_range.start)} - {formatDate(stats.date_range.end!)}
+            </span>
+          )}
+          {loading && (
+            <div className="animate-spin h-4 w-4 rounded-full border-2 border-gray-200 border-t-primary" />
+          )}
+          <button
+            onClick={handleValidate}
+            disabled={loading}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-60 ${
+              hasUnapplied
+                ? 'bg-primary text-white shadow-md ring-2 ring-primary/20 hover:bg-primary/90'
+                : 'bg-primary text-white hover:bg-primary/90'
+            }`}
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Appliquer
+          </button>
+        </div>
       </div>
 
       {/* KPI Cards */}
@@ -136,7 +168,7 @@ export function Dashboard({ client }: DashboardProps) {
           icon={<BarChart3 className="w-6 h-6" />}
         />
         <StatCard
-          title="Pages Uniques"
+          title="Pages Crawlées"
           value={formatNumber(stats.unique_pages)}
           icon={<FileText className="w-6 h-6" />}
         />
@@ -167,16 +199,16 @@ export function Dashboard({ client }: DashboardProps) {
         />
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-surface rounded-xl border border-gray-200 p-6">
-          <h3 className="font-semibold text-text mb-4">Frequence de Crawl</h3>
-          <CrawlLineChart data={stats.daily_crawls} />
-        </div>
-        <div className="bg-surface rounded-xl border border-gray-200 p-6">
-          <h3 className="font-semibold text-text mb-4">Codes HTTP</h3>
-          <HttpCodeChart data={stats.http_codes} />
-        </div>
+      {/* Crawl Frequency - full width */}
+      <div className="bg-surface rounded-xl border border-gray-200 p-6">
+        <h3 className="font-semibold text-text mb-4">Frequence de Crawl</h3>
+        <CrawlLineChart data={stats.daily_crawls} />
+      </div>
+
+      {/* HTTP Codes bar chart - full width */}
+      <div className="bg-surface rounded-xl border border-gray-200 p-6">
+        <h3 className="font-semibold text-text mb-4">Distribution des Codes HTTP</h3>
+        <HttpCodeChart data={stats.http_codes} />
       </div>
 
       {/* HTTP Code Details */}

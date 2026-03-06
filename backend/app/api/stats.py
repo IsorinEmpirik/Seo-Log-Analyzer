@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, distinct
 from datetime import date
 from typing import Optional, List
 from app.core.database import get_db
@@ -150,6 +150,59 @@ def get_date_range(
             "max_date": result[1].isoformat(),
         }
     return {"min_date": None, "max_date": None}
+
+
+@router.get("/{client_id}/bot-compare")
+def bot_compare(
+    client_id: int,
+    crawlers: List[str] = Query(...),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Compare multiple bots: summary stats and daily activity"""
+    base_q = db.query(Log).filter(
+        Log.client_id == client_id,
+        Log.crawler.in_(crawlers)
+    )
+    if start_date:
+        base_q = base_q.filter(Log.log_date >= start_date)
+    if end_date:
+        base_q = base_q.filter(Log.log_date <= end_date)
+
+    summary = (
+        base_q
+        .with_entities(
+            Log.crawler,
+            func.count(Log.id).label('requests'),
+            func.count(distinct(Log.url)).label('pages_crawled'),
+        )
+        .group_by(Log.crawler)
+        .all()
+    )
+
+    daily = (
+        base_q
+        .with_entities(
+            Log.crawler,
+            Log.log_date,
+            func.count(Log.id).label('count'),
+        )
+        .group_by(Log.crawler, Log.log_date)
+        .order_by(Log.log_date)
+        .all()
+    )
+
+    return {
+        "summary": [
+            {"crawler": r.crawler, "requests": r.requests, "pages_crawled": r.pages_crawled}
+            for r in summary
+        ],
+        "daily": [
+            {"crawler": r.crawler, "date": r.log_date.isoformat(), "count": r.count}
+            for r in daily
+        ]
+    }
 
 
 @router.get("/{client_id}/pages")

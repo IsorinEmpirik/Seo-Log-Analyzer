@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { BarChart3, Upload, FileSearch, GitCompare, Home } from 'lucide-react';
+import { BarChart3, Upload, FileSearch, GitCompare, Home, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface LayoutProps {
@@ -12,6 +12,7 @@ const navItems = [
   { path: '/pages', label: 'Pages', icon: BarChart3 },
   { path: '/orphans', label: 'Pages Orphelines', icon: FileSearch },
   { path: '/compare', label: 'Comparer', icon: GitCompare },
+  { path: '/bot-compare', label: 'Comparatif Bots', icon: Bot },
   { path: '/import', label: 'Importer', icon: Upload },
 ];
 

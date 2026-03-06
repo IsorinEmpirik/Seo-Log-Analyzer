@@ -241,6 +241,19 @@ export const getPages = (clientId: number, options?: {
 export const getDateRange = (clientId: number) =>
   fetchApi<DateRange>(`/stats/${clientId}/date-range`);
 
+export const getBotComparison = (
+  clientId: number,
+  crawlers: string[],
+  startDate?: string,
+  endDate?: string,
+) => {
+  const params = new URLSearchParams();
+  crawlers.forEach((c) => params.append('crawlers', c));
+  if (startDate) params.append('start_date', startDate);
+  if (endDate) params.append('end_date', endDate);
+  return fetchApi<BotComparisonResult>(`/stats/${clientId}/bot-compare?${params}`);
+};
+
 export const getPageTypes = (clientId: number) =>
   fetchApi<PageTypeStats[]>(`/stats/${clientId}/page-types`);
 
@@ -366,6 +379,11 @@ export interface PageTypeStats {
 export interface DateRange {
   min_date: string | null;
   max_date: string | null;
+}
+
+export interface BotComparisonResult {
+  summary: { crawler: string; requests: number; pages_crawled: number }[];
+  daily: { crawler: string; date: string; count: number }[];
 }
 
 export interface PeriodComparison {

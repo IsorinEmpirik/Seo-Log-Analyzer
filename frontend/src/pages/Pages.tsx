@@ -1,14 +1,24 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, ChevronLeft, ChevronRight, ExternalLink, Calendar, TrendingUp } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, ExternalLink, Calendar, TrendingUp, RefreshCw } from 'lucide-react';
 import { getPages, getDateRange, getBotFamilies, getFrequency, PageStats, BotFamily, Client, DateRange } from '@/lib/api';
 import { formatNumber, formatDateTime, getHttpCodeColor, formatDate } from '@/lib/utils';
 import { BotFilter } from '@/components/BotFilter';
 import { PageTypeFilter } from '@/components/PageTypeFilter';
-import { useDebounce } from '@/hooks/useDebounce';
 import Chart from 'chart.js/auto';
 
 interface PagesProps {
   client: Client | null;
+}
+
+interface LoadParams {
+  search?: string;
+  httpCode?: number;
+  pageType?: string;
+  offset: number;
+  botFamily?: string;
+  crawler?: string;
+  startDate?: string;
+  endDate?: string;
 }
 
 const HTTP_CODE_FILTERS = [
@@ -28,6 +38,14 @@ function buildFullUrl(path: string, domain?: string): string {
   return `${prefix}${path}`;
 }
 
+function Spinner() {
+  return (
+    <div className="flex items-center justify-center py-16">
+      <div className="animate-spin rounded-full h-10 w-10 border-2 border-gray-200 border-t-primary" />
+    </div>
+  );
+}
+
 // --- Mini inline line chart rendered via Chart.js ---
 interface UrlChartProps {
   clientId: number;
@@ -44,7 +62,6 @@ function UrlCrawlChart({ clientId, url, botFamily, crawler, startDate, endDate }
   const [loading, setLoading] = useState(true);
   const [chartData, setChartData] = useState<{ period: string; count: number }[]>([]);
 
-  // Step 1: fetch data
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -75,7 +92,6 @@ function UrlCrawlChart({ clientId, url, botFamily, crawler, startDate, endDate }
     return () => { cancelled = true; };
   }, [clientId, url, botFamily, crawler, startDate, endDate]);
 
-  // Step 2: draw chart once canvas is in the DOM (after loading → false)
   useEffect(() => {
     if (loading || chartData.length === 0) {
       chartRef.current?.destroy();
@@ -172,51 +188,42 @@ export function Pages({ client }: PagesProps) {
   const [endDate, setEndDate] = useState('');
   const [dateRange, setDateRange] = useState<DateRange | null>(null);
   const [expandedUrl, setExpandedUrl] = useState<string | null>(null);
+  const [hasUnapplied, setHasUnapplied] = useState(false);
+  const [appliedParams, setAppliedParams] = useState<LoadParams | null>(null);
   const limit = 50;
-
-  const debouncedSearch = useDebounce(search, 400);
 
   useEffect(() => {
     getBotFamilies().then(setBotFamilies).catch(() => {});
   }, []);
 
+  // Auto-load on client change: reset all filters and trigger load
   useEffect(() => {
-    if (client) {
-      getDateRange(client.id).then(setDateRange).catch(() => {});
-      setStartDate('');
-      setEndDate('');
-    }
+    if (!client) return;
+    getDateRange(client.id).then(setDateRange).catch(() => {});
+    setSearch('');
+    setHttpCode(undefined);
+    setPageType(undefined);
+    setSelectedFamily(null);
+    setSelectedBot(null);
+    setStartDate('');
+    setEndDate('');
+    setOffset(0);
+    setExpandedUrl(null);
+    setHasUnapplied(false);
+    setAppliedParams({ offset: 0 });
   }, [client]);
 
+  // Load whenever appliedParams changes (triggered by Valider or pagination)
   useEffect(() => {
-    if (client) {
-      setOffset(0);
-      setExpandedUrl(null);
-      loadPages();
-    }
-  }, [client, debouncedSearch, httpCode, pageType, selectedFamily, selectedBot, startDate, endDate]);
+    if (!client || appliedParams === null) return;
+    loadPages(appliedParams);
+  }, [appliedParams]);
 
-  useEffect(() => {
-    if (client) {
-      loadPages();
-    }
-  }, [offset]);
-
-  const loadPages = async () => {
+  const loadPages = async (params: LoadParams) => {
     if (!client) return;
     setLoading(true);
     try {
-      const data = await getPages(client.id, {
-        search: debouncedSearch || undefined,
-        httpCode,
-        pageType,
-        limit,
-        offset,
-        botFamily: selectedFamily || undefined,
-        crawler: selectedBot || undefined,
-        startDate: startDate || undefined,
-        endDate: endDate || undefined,
-      });
+      const data = await getPages(client.id, { ...params, limit });
       setPages(data.pages);
       setTotal(data.total);
     } catch (error) {
@@ -225,6 +232,32 @@ export function Pages({ client }: PagesProps) {
       setLoading(false);
     }
   };
+
+  const handleValidate = () => {
+    const params: LoadParams = {
+      search: search || undefined,
+      httpCode,
+      pageType,
+      offset: 0,
+      botFamily: selectedFamily || undefined,
+      crawler: selectedBot || undefined,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+    };
+    setOffset(0);
+    setExpandedUrl(null);
+    setHasUnapplied(false);
+    setAppliedParams(params);
+  };
+
+  const changePage = (newOffset: number) => {
+    setOffset(newOffset);
+    setAppliedParams((prev) =>
+      prev ? { ...prev, offset: newOffset } : { offset: newOffset }
+    );
+  };
+
+  const markUnapplied = () => setHasUnapplied(true);
 
   const totalPages = Math.ceil(total / limit);
   const currentPage = Math.floor(offset / limit) + 1;
@@ -241,6 +274,12 @@ export function Pages({ client }: PagesProps) {
     setExpandedUrl((prev) => (prev === url ? null : url));
   }
 
+  // Extract applied filters for the URL chart (use appliedParams if available)
+  const appliedStartDate = appliedParams?.startDate;
+  const appliedEndDate = appliedParams?.endDate;
+  const appliedFamily = appliedParams?.botFamily ?? null;
+  const appliedCrawler = appliedParams?.crawler ?? null;
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -255,38 +294,35 @@ export function Pages({ client }: PagesProps) {
       <div className="flex flex-col gap-4">
         {/* Row 1: Search + Bot + PageType + HTTP Code */}
         <div className="flex flex-col sm:flex-row gap-4 items-center">
-          {/* Search */}
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
             <input
               type="text"
               placeholder="Rechercher une URL..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); markUnapplied(); }}
+              onKeyDown={(e) => e.key === 'Enter' && handleValidate()}
               className="pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
 
-          {/* Bot filter */}
           <BotFilter
             families={botFamilies}
             selectedFamily={selectedFamily}
             selectedBot={selectedBot}
-            onFamilyChange={setSelectedFamily}
-            onBotChange={setSelectedBot}
+            onFamilyChange={(v) => { setSelectedFamily(v); markUnapplied(); }}
+            onBotChange={(v) => { setSelectedBot(v); markUnapplied(); }}
           />
 
-          {/* Page type filter */}
           <PageTypeFilter
             client={client}
             value={pageType}
-            onChange={setPageType}
+            onChange={(v) => { setPageType(v); markUnapplied(); }}
           />
 
-          {/* HTTP Code filter */}
           <select
             value={httpCode ?? ''}
-            onChange={(e) => setHttpCode(e.target.value ? Number(e.target.value) : undefined)}
+            onChange={(e) => { setHttpCode(e.target.value ? Number(e.target.value) : undefined); markUnapplied(); }}
             className="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
           >
             {HTTP_CODE_FILTERS.map((filter) => (
@@ -297,7 +333,7 @@ export function Pages({ client }: PagesProps) {
           </select>
         </div>
 
-        {/* Row 2: Date filters */}
+        {/* Row 2: Date filters + Appliquer */}
         <div className="flex flex-wrap items-center gap-3">
           <Calendar className="w-4 h-4 text-text-muted" />
           <div className="flex items-center gap-2">
@@ -307,7 +343,7 @@ export function Pages({ client }: PagesProps) {
               value={startDate}
               min={dateRange?.min_date || undefined}
               max={dateRange?.max_date || undefined}
-              onChange={(e) => setStartDate(e.target.value)}
+              onChange={(e) => { setStartDate(e.target.value); markUnapplied(); }}
               className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
@@ -318,7 +354,7 @@ export function Pages({ client }: PagesProps) {
               value={endDate}
               min={dateRange?.min_date || undefined}
               max={dateRange?.max_date || undefined}
-              onChange={(e) => setEndDate(e.target.value)}
+              onChange={(e) => { setEndDate(e.target.value); markUnapplied(); }}
               className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
@@ -329,12 +365,31 @@ export function Pages({ client }: PagesProps) {
           )}
           {(startDate || endDate) && (
             <button
-              onClick={() => { setStartDate(''); setEndDate(''); }}
+              onClick={() => { setStartDate(''); setEndDate(''); markUnapplied(); }}
               className="text-xs text-primary hover:underline ml-1"
             >
               Réinitialiser
             </button>
           )}
+
+          {/* Appliquer */}
+          <div className="flex items-center gap-2 ml-auto">
+            {loading && (
+              <div className="animate-spin h-4 w-4 rounded-full border-2 border-gray-200 border-t-primary" />
+            )}
+            <button
+              onClick={handleValidate}
+              disabled={loading}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-60 ${
+                hasUnapplied
+                  ? 'bg-primary text-white shadow-md ring-2 ring-primary/20 hover:bg-primary/90'
+                  : 'bg-primary text-white hover:bg-primary/90'
+              }`}
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Appliquer
+            </button>
+          </div>
         </div>
       </div>
 
@@ -347,7 +402,7 @@ export function Pages({ client }: PagesProps) {
           {totalPages > 1 && (
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setOffset(Math.max(0, offset - limit))}
+                onClick={() => changePage(Math.max(0, offset - limit))}
                 disabled={offset === 0}
                 className="p-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -357,7 +412,7 @@ export function Pages({ client }: PagesProps) {
                 Page {currentPage} / {totalPages}
               </span>
               <button
-                onClick={() => setOffset(offset + limit)}
+                onClick={() => changePage(offset + limit)}
                 disabled={currentPage >= totalPages}
                 className="p-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -368,7 +423,7 @@ export function Pages({ client }: PagesProps) {
         </div>
 
         {loading ? (
-          <div className="text-center py-12 text-text-muted">Chargement...</div>
+          <Spinner />
         ) : pages.length === 0 ? (
           <div className="text-center py-12 text-text-muted">
             Aucune page trouvée
@@ -451,7 +506,6 @@ export function Pages({ client }: PagesProps) {
                         </td>
                       </tr>
 
-                      {/* Accordion chart row */}
                       {isExpanded && (
                         <tr key={`${page.url}-chart`} className="bg-blue-50/30">
                           <td colSpan={6} className="px-6 py-4">
@@ -460,21 +514,21 @@ export function Pages({ client }: PagesProps) {
                               <span className="text-sm font-medium text-text">
                                 Évolution des crawls par jour
                               </span>
-                              {(startDate || endDate) && (
+                              {(appliedStartDate || appliedEndDate) && (
                                 <span className="text-xs text-text-muted">
-                                  · {startDate && new Date(startDate).toLocaleDateString('fr-FR')}
-                                  {startDate && endDate && ' → '}
-                                  {endDate && new Date(endDate).toLocaleDateString('fr-FR')}
+                                  · {appliedStartDate && new Date(appliedStartDate).toLocaleDateString('fr-FR')}
+                                  {appliedStartDate && appliedEndDate && ' → '}
+                                  {appliedEndDate && new Date(appliedEndDate).toLocaleDateString('fr-FR')}
                                 </span>
                               )}
                             </div>
                             <UrlCrawlChart
                               clientId={client.id}
                               url={page.url}
-                              botFamily={selectedFamily}
-                              crawler={selectedBot}
-                              startDate={startDate || undefined}
-                              endDate={endDate || undefined}
+                              botFamily={appliedFamily}
+                              crawler={appliedCrawler}
+                              startDate={appliedStartDate}
+                              endDate={appliedEndDate}
                             />
                           </td>
                         </tr>
